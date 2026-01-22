@@ -1,23 +1,26 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMultiplayer } from '@/hooks/useMultiplayer';
 
 interface MatchmakingScreenProps {
   onCancel: () => void;
   onMatchStart: () => void;
+  joinSessionId?: string | null;
 }
 
-export function MatchmakingScreen({ onCancel, onMatchStart }: MatchmakingScreenProps) {
+export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: MatchmakingScreenProps) {
   const {
     connectionStatus,
     opponentName,
     queuePosition,
     countdown,
     error,
+    sessionId,
     connect,
     findMatch,
+    joinSession,
     cancelMatch,
     reset,
     isMatched,
@@ -27,13 +30,17 @@ export function MatchmakingScreen({ onCancel, onMatchStart }: MatchmakingScreenP
   useEffect(() => {
     const startMatchmaking = async () => {
       await connect();
-      await findMatch();
+      if (joinSessionId) {
+        await joinSession(joinSessionId);
+      } else {
+        await findMatch();
+      }
     };
 
     if (connectionStatus === 'disconnected') {
       startMatchmaking();
     }
-  }, [connect, findMatch, connectionStatus]);
+  }, [connect, findMatch, joinSession, connectionStatus, joinSessionId]);
 
   // Handle countdown completion
   useEffect(() => {
@@ -104,7 +111,11 @@ export function MatchmakingScreen({ onCancel, onMatchStart }: MatchmakingScreenP
 
             {/* Matchmaking State */}
             {connectionStatus === 'matchmaking' && (
-              <MatchmakingContent key="matchmaking" queuePosition={queuePosition} />
+              <MatchmakingContent
+                key="matchmaking"
+                queuePosition={queuePosition}
+                sessionId={sessionId}
+              />
             )}
 
             {/* Matched State */}
@@ -182,9 +193,21 @@ function ConnectingContent() {
 
 interface MatchmakingContentProps {
   queuePosition: number | null;
+  sessionId: string | null;
 }
 
-function MatchmakingContent({ queuePosition }: MatchmakingContentProps) {
+function MatchmakingContent({ queuePosition, sessionId }: MatchmakingContentProps) {
+  const [copied, setCopied] = useState(false);
+
+  const copyInviteLink = () => {
+    if (sessionId && typeof window !== 'undefined') {
+      const url = `${window.location.origin}?session=${sessionId}`;
+      navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -212,24 +235,46 @@ function MatchmakingContent({ queuePosition }: MatchmakingContentProps) {
       </div>
 
       <h3 className="text-xl font-semibold text-cyan-100 mb-2">
-        Finding opponent...
+        Waiting for Player...
       </h3>
 
-      {queuePosition !== null && queuePosition > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mt-4"
-        >
-          <p className="text-sm text-gray-400 mb-1">Queue Position</p>
-          <span className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-cyan-500">
-            #{queuePosition}
-          </span>
-        </motion.div>
+      {sessionId && (
+        <div className="mt-6 mb-6">
+          <p className="text-sm text-gray-400 mb-2">Invite a friend to play!</p>
+          <button
+            onClick={copyInviteLink}
+            className="
+              flex items-center justify-center gap-2 mx-auto
+              py-2 px-4
+              text-sm font-bold tracking-wider
+              text-cyan-400
+              bg-cyan-950/50 border border-cyan-500/50
+              rounded-lg
+              transition-all duration-200
+              hover:bg-cyan-900/50 hover:border-cyan-400
+            "
+          >
+            {copied ? (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                COPIED!
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                COPY INVITE LINK
+              </>
+            )}
+          </button>
+        </div>
       )}
 
       <p className="text-sm text-gray-500 mt-4">
-        Searching for players near your skill level...
+        Searching for players...
       </p>
     </motion.div>
   );

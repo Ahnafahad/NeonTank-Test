@@ -138,6 +138,29 @@ export function useMultiplayer() {
         }
     }, [setConnectionStatus, setQueuePosition, setSessionInfo, setOpponent, setError]);
 
+    // Join specific session
+    const joinSession = useCallback(async (sessionId: string) => {
+        if (!networkManagerRef.current) return;
+
+        try {
+            setConnectionStatus('matchmaking');
+
+            const session = await networkManagerRef.current.joinSession(sessionId);
+            setSessionInfo(session.sessionId, networkManagerRef.current.getPlayerId());
+
+            if (session.players.length === 2) {
+                const opponent = session.players.find(
+                    (p) => p.id !== networkManagerRef.current?.getPlayerId()
+                );
+                if (opponent) {
+                    setOpponent(opponent.id, opponent.name);
+                }
+            }
+        } catch (err: any) {
+            setError(err.message || 'Failed to join session');
+        }
+    }, [setConnectionStatus, setSessionInfo, setOpponent, setError]);
+
     // Cancel matchmaking
     const cancelMatch = useCallback(() => {
         networkManagerRef.current?.leaveMatch();
@@ -176,6 +199,7 @@ export function useMultiplayer() {
         connect,
         disconnect,
         findMatch,
+        joinSession,
         cancelMatch,
         sendInput,
         updatePlayerName,

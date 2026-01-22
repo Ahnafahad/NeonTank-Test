@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useGameStore } from '@/store/useGameStore';
 import { useResponsiveCanvas, useIsMobile } from '@/hooks/useResponsiveCanvas';
 import { Game } from '@/engine/core/Game';
@@ -11,12 +12,23 @@ import { MatchmakingScreen } from '@/components/menus/MatchmakingScreen';
 import type { AIDifficulty } from '@/engine/ai';
 
 export default function HomePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#050505]" />}>
+      <GameContent />
+    </Suspense>
+  );
+}
+
+function GameContent() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<Game | null>(null);
   const animationRef = useRef<number | null>(null);
   const [showAIDifficultySelect, setShowAIDifficultySelect] = useState(false);
   const [showMatchmaking, setShowMatchmaking] = useState(false);
   const [aiDifficulty, setAIDifficulty] = useState<AIDifficulty>('medium');
+
+  const searchParams = useSearchParams();
+  const joinSessionId = searchParams.get('session');
 
   const {
     currentScreen,
@@ -31,6 +43,13 @@ export default function HomePage() {
     setMode,
     updateStats,
   } = useGameStore();
+
+  // Auto-join if session ID is present
+  useEffect(() => {
+    if (joinSessionId && !showMatchmaking && currentScreen === 'menu') {
+      setShowMatchmaking(true);
+    }
+  }, [joinSessionId, showMatchmaking, currentScreen]);
 
   const isMobile = useIsMobile();
   const { width, height } = useResponsiveCanvas(
@@ -134,6 +153,7 @@ export default function HomePage() {
         <MatchmakingScreen
           onCancel={handleCancelMatchmaking}
           onMatchStart={handleOnlineMatchStart}
+          joinSessionId={joinSessionId}
         />
       );
     }
