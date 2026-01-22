@@ -32,22 +32,33 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
     cancelMatch,
     reset,
     isMatched,
+    updatePlayerName,
   } = useMultiplayer();
 
   // Start matchmaking after setup
   useEffect(() => {
     if (screen === 'matchmaking' && connectionStatus === 'disconnected') {
       const startMatchmaking = async () => {
+        console.log('[MatchmakingScreen] Starting matchmaking...', { playerName, isJoining, sessionCode });
+
+        // Update player name in multiplayer system
+        updatePlayerName(playerName);
+
+        console.log('[MatchmakingScreen] Connecting to server...');
         await connect();
+        console.log('[MatchmakingScreen] Connected!');
+
         if (isJoining && sessionCode) {
+          console.log('[MatchmakingScreen] Joining session:', sessionCode);
           await joinSession(sessionCode);
         } else {
+          console.log('[MatchmakingScreen] Finding match...');
           await findMatch();
         }
       };
       startMatchmaking();
     }
-  }, [screen, connect, findMatch, joinSession, connectionStatus, isJoining, sessionCode]);
+  }, [screen, connect, findMatch, joinSession, connectionStatus, isJoining, sessionCode, playerName, updatePlayerName]);
 
   // Handle countdown completion
   useEffect(() => {

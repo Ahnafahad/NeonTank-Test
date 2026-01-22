@@ -83,19 +83,19 @@ export default function MobileControls({
     );
   }
 
-  // Portrait layout: Controls at bottom, split left/right
+  // Portrait layout: P1 controls at top (near camera), P2 controls at bottom (near home button)
   if (orientation === 'portrait') {
     return (
-      <div
-        className="fixed bottom-0 left-0 right-0 flex touch-none"
-        style={{
-          height: '220px',
-          background: 'linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.7))',
-          borderTop: '1px solid #333',
-        }}
-      >
-        {/* Player 1 Controls - Left Side */}
-        <div className="flex-1 flex items-center justify-center gap-4 px-2">
+      <>
+        {/* Player 1 Controls - Top (Near Camera) */}
+        <div
+          className="fixed top-0 left-0 right-0 flex items-center justify-between px-4 touch-none"
+          style={{
+            height: '150px',
+            background: 'linear-gradient(to bottom, rgba(0,0,0,0.9), rgba(0,0,0,0.5))',
+            borderBottom: '1px solid rgba(255,0,85,0.3)',
+          }}
+        >
           <Joystick
             size={100}
             color={p1Color}
@@ -113,16 +113,15 @@ export default function MobileControls({
           />
         </div>
 
-        {/* Divider */}
+        {/* Player 2 Controls - Bottom (Near Home Button) */}
         <div
-          className="w-px self-stretch my-4"
+          className="fixed bottom-0 left-0 right-0 flex items-center justify-between px-4 touch-none"
           style={{
-            background: 'linear-gradient(to bottom, transparent, #444, transparent)',
+            height: '150px',
+            background: 'linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.5))',
+            borderTop: '1px solid rgba(0,255,255,0.3)',
           }}
-        />
-
-        {/* Player 2 Controls - Right Side */}
-        <div className="flex-1 flex items-center justify-center gap-4 px-2">
+        >
           <ShootButton
             size={70}
             color={p2Color}
@@ -139,7 +138,7 @@ export default function MobileControls({
             onRelease={onP2MoveEnd}
           />
         </div>
-      </div>
+      </>
     );
   }
 

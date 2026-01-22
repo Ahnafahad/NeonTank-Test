@@ -61,8 +61,12 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        // No match yet, create a session and add to queue
-        const sessionId = 'match_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+        // No match yet, create a 5-character session code and add to queue
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing characters
+        let sessionId = '';
+        for (let i = 0; i < 5; i++) {
+            sessionId += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
 
         const entry: QueueEntry = {
             playerId,

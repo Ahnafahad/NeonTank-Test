@@ -43,6 +43,7 @@ export function useMultiplayer() {
             // Set up callbacks
             networkManagerRef.current.setCallbacks({
                 onStatusChange: (status: NetworkStatus) => {
+                    console.log('[useMultiplayer] Status changed:', status);
                     // Map network status to store status
                     const storeStatus = status as typeof connectionStatus;
                     setConnectionStatus(storeStatus);
@@ -51,12 +52,15 @@ export function useMultiplayer() {
                     setGameState(state);
                 },
                 onMatchFound: (opponent, tankId) => {
+                    console.log('[useMultiplayer] Match found callback:', opponent, tankId);
                     setOpponent(opponent.id, opponent.name);
                     setAssignedTankId(tankId);
                     setCountdown(3); // Start countdown
                 },
                 onPlayerJoined: (player) => {
+                    console.log('[useMultiplayer] Player joined callback:', player);
                     if (player.id !== networkManagerRef.current?.getPlayerId()) {
+                        console.log('[useMultiplayer] Setting as opponent');
                         setOpponent(player.id, player.name);
                     }
                 },
@@ -99,11 +103,14 @@ export function useMultiplayer() {
         if (!networkManagerRef.current) return;
 
         try {
+            console.log('[useMultiplayer] Connecting to server...');
             await networkManagerRef.current.connect();
+            console.log('[useMultiplayer] Connected! Player ID:', networkManagerRef.current.getPlayerId());
             if (networkManagerRef.current.getPlayerId()) {
                 setSessionInfo('', networkManagerRef.current.getPlayerId());
             }
         } catch (err) {
+            console.error('[useMultiplayer] Connection failed:', err);
             setError('Failed to connect to server');
         }
     }, [setSessionInfo, setError]);
@@ -119,21 +126,28 @@ export function useMultiplayer() {
         if (!networkManagerRef.current) return;
 
         try {
+            console.log('[useMultiplayer] Starting matchmaking...');
             setConnectionStatus('matchmaking');
             setQueuePosition(1);
 
             const session = await networkManagerRef.current.findMatch();
+            console.log('[useMultiplayer] Matchmaking result:', session);
             setSessionInfo(session.sessionId, networkManagerRef.current.getPlayerId());
 
             if (session.players.length === 2) {
+                console.log('[useMultiplayer] Match found with 2 players!');
                 const opponent = session.players.find(
                     (p) => p.id !== networkManagerRef.current?.getPlayerId()
                 );
                 if (opponent) {
+                    console.log('[useMultiplayer] Opponent:', opponent);
                     setOpponent(opponent.id, opponent.name);
                 }
+            } else {
+                console.log('[useMultiplayer] Waiting for opponent... Players:', session.players.length);
             }
         } catch (err) {
+            console.error('[useMultiplayer] Matchmaking failed:', err);
             setError('Failed to find match');
         }
     }, [setConnectionStatus, setQueuePosition, setSessionInfo, setOpponent, setError]);
@@ -143,20 +157,27 @@ export function useMultiplayer() {
         if (!networkManagerRef.current) return;
 
         try {
+            console.log('[useMultiplayer] Joining session:', sessionId);
             setConnectionStatus('matchmaking');
 
             const session = await networkManagerRef.current.joinSession(sessionId);
+            console.log('[useMultiplayer] Joined session:', session);
             setSessionInfo(session.sessionId, networkManagerRef.current.getPlayerId());
 
             if (session.players.length === 2) {
+                console.log('[useMultiplayer] Session has 2 players!');
                 const opponent = session.players.find(
                     (p) => p.id !== networkManagerRef.current?.getPlayerId()
                 );
                 if (opponent) {
+                    console.log('[useMultiplayer] Opponent found:', opponent);
                     setOpponent(opponent.id, opponent.name);
                 }
+            } else {
+                console.log('[useMultiplayer] Waiting for opponent in session... Players:', session.players.length);
             }
         } catch (err: any) {
+            console.error('[useMultiplayer] Failed to join session:', err);
             setError(err.message || 'Failed to join session');
         }
     }, [setConnectionStatus, setSessionInfo, setOpponent, setError]);
