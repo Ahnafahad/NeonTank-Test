@@ -96,7 +96,8 @@ export function useMultiplayer() {
             networkManagerRef.current?.disconnect();
             networkManagerRef.current = null;
         };
-    }, [setConnectionStatus, setGameState, setOpponent, setAssignedTankId, setCountdown, setRoundNumber, setError, setLatency, opponentId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Connect to server
     const connect = useCallback(async () => {

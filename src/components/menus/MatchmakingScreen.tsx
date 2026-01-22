@@ -62,10 +62,12 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
 
   // Handle countdown completion
   useEffect(() => {
+    console.log('[MatchmakingScreen] Countdown/Match check:', { countdown, isMatched, connectionStatus });
     if (countdown === 0 && isMatched) {
+      console.log('[MatchmakingScreen] Starting game!');
       onMatchStart(playerName, controlScheme);
     }
-  }, [countdown, isMatched, onMatchStart, playerName, controlScheme]);
+  }, [countdown, isMatched, onMatchStart, playerName, controlScheme, connectionStatus]);
 
   const handleCancel = () => {
     cancelMatch();
