@@ -26,6 +26,8 @@ function GameContent() {
   const [showAIDifficultySelect, setShowAIDifficultySelect] = useState(false);
   const [showMatchmaking, setShowMatchmaking] = useState(false);
   const [aiDifficulty, setAIDifficulty] = useState<AIDifficulty>('medium');
+  const [onlinePlayerName, setOnlinePlayerName] = useState('');
+  const [onlineControlScheme, setOnlineControlScheme] = useState<'wasd' | 'arrows'>('wasd');
 
   const searchParams = useSearchParams();
   const joinSessionId = searchParams.get('session');
@@ -79,7 +81,12 @@ function GameContent() {
   // Initialize game when entering playing state
   useEffect(() => {
     if (currentScreen === 'playing' && canvasRef.current && !gameRef.current) {
-      const settings = mode === 'ai' ? { aiDifficulty } : undefined;
+      let settings = undefined;
+      if (mode === 'ai') {
+        settings = { aiDifficulty };
+      } else if (mode === 'online') {
+        settings = { localPlayerControls: onlineControlScheme };
+      }
       gameRef.current = new Game(canvasRef.current, mode, settings);
       gameRef.current.start();
       animationRef.current = requestAnimationFrame(pollGameStats);
@@ -90,7 +97,7 @@ function GameContent() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [currentScreen, mode, aiDifficulty, pollGameStats]);
+  }, [currentScreen, mode, aiDifficulty, onlineControlScheme, pollGameStats]);
 
   // Cleanup game on screen change
   useEffect(() => {
@@ -121,7 +128,9 @@ function GameContent() {
     startGame();
   };
 
-  const handleOnlineMatchStart = () => {
+  const handleOnlineMatchStart = (playerName: string, controls: 'wasd' | 'arrows') => {
+    setOnlinePlayerName(playerName);
+    setOnlineControlScheme(controls);
     setShowMatchmaking(false);
     setMode('online');
     startGame();

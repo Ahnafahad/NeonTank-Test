@@ -36,6 +36,9 @@ export interface GameSettings {
 
   // AI settings
   aiDifficulty: AIDifficulty;
+
+  // Online multiplayer settings
+  localPlayerControls?: 'wasd' | 'arrows'; // For online mode: which controls this client uses
 }
 
 export class Game {
@@ -213,9 +216,26 @@ export class Game {
 
     const keys = this.inputManager.getKeyboardState();
 
+    // In online mode, only process controls for the local player
+    let p1Keys = keys;
+    let p2Keys = keys;
+
+    if (this.mode === 'online' && this.settings.localPlayerControls) {
+      // Filter controls - only allow the chosen control scheme
+      const emptyKeys: Record<string, boolean> = {};
+
+      if (this.settings.localPlayerControls === 'wasd') {
+        // Local player uses WASD (P1 controls), disable P2 arrow controls
+        p2Keys = emptyKeys;
+      } else {
+        // Local player uses Arrows (P2 controls), disable P1 WASD controls
+        p1Keys = emptyKeys;
+      }
+    }
+
     // Update tanks with game speed multiplier
     const p1Bullets = this.p1.update(
-      keys,
+      p1Keys,
       this.walls,
       this.crates,
       this.hazards,
@@ -228,7 +248,6 @@ export class Game {
     this.bullets.push(...p1Bullets);
 
     // Get P2 input (AI or keyboard)
-    let p2Keys = keys;
     if (this.mode === 'ai' && this.tankAI) {
       const aiInput = this.tankAI.update(
         this.p2,

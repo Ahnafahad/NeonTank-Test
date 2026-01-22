@@ -4,13 +4,21 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMultiplayer } from '@/hooks/useMultiplayer';
 
+export type ControlScheme = 'wasd' | 'arrows';
+
 interface MatchmakingScreenProps {
   onCancel: () => void;
-  onMatchStart: () => void;
+  onMatchStart: (playerName: string, controls: ControlScheme) => void;
   joinSessionId?: string | null;
 }
 
 export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: MatchmakingScreenProps) {
+  const [screen, setScreen] = useState<'setup' | 'matchmaking'>('setup');
+  const [playerName, setPlayerName] = useState('');
+  const [controlScheme, setControlScheme] = useState<ControlScheme>('wasd');
+  const [sessionCode, setSessionCode] = useState(joinSessionId || '');
+  const [isJoining, setIsJoining] = useState(!!joinSessionId);
+
   const {
     connectionStatus,
     opponentName,
@@ -26,28 +34,27 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
     isMatched,
   } = useMultiplayer();
 
-  // Auto-connect and start matchmaking
+  // Start matchmaking after setup
   useEffect(() => {
-    const startMatchmaking = async () => {
-      await connect();
-      if (joinSessionId) {
-        await joinSession(joinSessionId);
-      } else {
-        await findMatch();
-      }
-    };
-
-    if (connectionStatus === 'disconnected') {
+    if (screen === 'matchmaking' && connectionStatus === 'disconnected') {
+      const startMatchmaking = async () => {
+        await connect();
+        if (isJoining && sessionCode) {
+          await joinSession(sessionCode);
+        } else {
+          await findMatch();
+        }
+      };
       startMatchmaking();
     }
-  }, [connect, findMatch, joinSession, connectionStatus, joinSessionId]);
+  }, [screen, connect, findMatch, joinSession, connectionStatus, isJoining, sessionCode]);
 
   // Handle countdown completion
   useEffect(() => {
     if (countdown === 0 && isMatched) {
-      onMatchStart();
+      onMatchStart(playerName, controlScheme);
     }
-  }, [countdown, isMatched, onMatchStart]);
+  }, [countdown, isMatched, onMatchStart, playerName, controlScheme]);
 
   const handleCancel = () => {
     cancelMatch();
@@ -57,9 +64,204 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
 
   const handleRetry = () => {
     reset();
-    connect().then(() => findMatch());
+    setScreen('setup');
   };
 
+  const handleStartMatchmaking = () => {
+    if (!playerName.trim()) return;
+    setScreen('matchmaking');
+  };
+
+  const generateSessionCode = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing characters
+    let code = '';
+    for (let i = 0; i < 5; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+  };
+
+  // Setup Screen
+  if (screen === 'setup') {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center bg-gray-950 overflow-hidden p-6">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <motion.div
+            className="absolute top-1/4 left-1/4 w-96 h-96 bg-pink-500/20 rounded-full blur-[100px]"
+            animate={{
+              scale: [1, 1.2, 1],
+              opacity: [0.2, 0.3, 0.2],
+            }}
+            transition={{
+              duration: 3,
+              ease: 'easeInOut',
+              repeat: Infinity,
+            }}
+          />
+          <motion.div
+            className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-500/20 rounded-full blur-[100px]"
+            animate={{
+              scale: [1.2, 1, 1.2],
+              opacity: [0.3, 0.2, 0.3],
+            }}
+            transition={{
+              duration: 3,
+              ease: 'easeInOut',
+              repeat: Infinity,
+            }}
+          />
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="relative z-10 w-full max-w-md"
+        >
+          <h2 className="text-2xl md:text-3xl font-bold text-center mb-8 text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-cyan-500">
+            ONLINE SETUP
+          </h2>
+
+          <div className="bg-gray-900/60 border border-cyan-500/30 rounded-xl p-8 mb-6 space-y-6">
+            {/* Player Name */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-300 mb-2">
+                Your Name
+              </label>
+              <input
+                type="text"
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value.slice(0, 20))}
+                placeholder="Enter your name"
+                className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 transition-colors"
+                maxLength={20}
+              />
+            </div>
+
+            {/* Control Scheme */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-300 mb-3">
+                Choose Controls
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setControlScheme('wasd')}
+                  className={`p-4 rounded-lg border-2 transition-all ${
+                    controlScheme === 'wasd'
+                      ? 'border-cyan-500 bg-cyan-500/10 shadow-[0_0_15px_rgba(0,255,255,0.3)]'
+                      : 'border-gray-600 bg-gray-800/50 hover:border-gray-500'
+                  }`}
+                >
+                  <div className="text-lg font-bold text-white mb-1">WASD</div>
+                  <div className="text-xs text-gray-400">W/A/S/D + Space</div>
+                </button>
+                <button
+                  onClick={() => setControlScheme('arrows')}
+                  className={`p-4 rounded-lg border-2 transition-all ${
+                    controlScheme === 'arrows'
+                      ? 'border-cyan-500 bg-cyan-500/10 shadow-[0_0_15px_rgba(0,255,255,0.3)]'
+                      : 'border-gray-600 bg-gray-800/50 hover:border-gray-500'
+                  }`}
+                >
+                  <div className="text-lg font-bold text-white mb-1">Arrows</div>
+                  <div className="text-xs text-gray-400">↑/←/↓/→ + Enter</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Join or Create */}
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <button
+                  onClick={() => {
+                    setIsJoining(false);
+                    setSessionCode('');
+                  }}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    !isJoining
+                      ? 'bg-cyan-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Create Game
+                </button>
+                <button
+                  onClick={() => setIsJoining(true)}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    isJoining
+                      ? 'bg-cyan-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  Join Game
+                </button>
+              </div>
+
+              {isJoining && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                >
+                  <input
+                    type="text"
+                    value={sessionCode}
+                    onChange={(e) => setSessionCode(e.target.value.toUpperCase().slice(0, 5))}
+                    placeholder="Enter 5-character code"
+                    className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white text-center text-xl font-mono tracking-widest placeholder-gray-500 focus:outline-none focus:border-cyan-500 transition-colors uppercase"
+                    maxLength={5}
+                  />
+                </motion.div>
+              )}
+            </div>
+
+            {/* Start Button */}
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handleStartMatchmaking}
+              disabled={!playerName.trim() || (isJoining && sessionCode.length !== 5)}
+              className="
+                w-full py-3 px-6
+                text-sm font-bold tracking-wider
+                text-white
+                bg-gradient-to-r from-pink-600 to-cyan-600
+                border border-transparent
+                rounded-lg
+                shadow-[0_0_20px_rgba(0,255,255,0.3)]
+                transition-all duration-200
+                hover:shadow-[0_0_30px_rgba(0,255,255,0.5)]
+                focus:outline-none focus:ring-2 focus:ring-cyan-500/50
+                disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none
+              "
+            >
+              {isJoining ? 'JOIN GAME' : 'CREATE GAME'}
+            </motion.button>
+          </div>
+
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={onCancel}
+            className="
+              w-full py-3 px-6
+              text-sm font-bold tracking-wider
+              text-gray-400
+              bg-gray-800/80 border border-gray-600
+              rounded-lg
+              transition-all duration-200
+              hover:text-white hover:border-gray-500
+              focus:outline-none focus:ring-2 focus:ring-gray-500/50
+            "
+          >
+            CANCEL
+          </motion.button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Matchmaking Screen
   return (
     <div className="fixed inset-0 flex flex-col items-center justify-center bg-gray-950 overflow-hidden p-6">
       {/* Background glow effects */}
@@ -123,7 +325,6 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
               <MatchedContent
                 key="matched"
                 opponentName={opponentName}
-                onMatchStart={onMatchStart}
               />
             )}
 
@@ -199,14 +400,13 @@ interface MatchmakingContentProps {
 function MatchmakingContent({ queuePosition, sessionId }: MatchmakingContentProps) {
   const [copied, setCopied] = useState(false);
 
-  const copyInviteLink = () => {
+  const copySessionCode = () => {
     if (sessionId && typeof window !== 'undefined') {
-      const url = `${window.location.origin}?session=${sessionId}`;
-      navigator.clipboard.writeText(url).then(() => {
+      navigator.clipboard.writeText(sessionId).then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }).catch(err => {
-        console.error('Failed to copy invite link:', err);
+        console.error('Failed to copy session code:', err);
       });
     }
   };
@@ -243,9 +443,14 @@ function MatchmakingContent({ queuePosition, sessionId }: MatchmakingContentProp
 
       {sessionId && (
         <div className="mt-6 mb-6">
-          <p className="text-sm text-gray-400 mb-2">Invite a friend to play!</p>
+          <p className="text-sm text-gray-400 mb-2">Share this code with your friend!</p>
+          <div className="bg-gray-800/80 border-2 border-cyan-500/50 rounded-lg p-4 mb-3">
+            <div className="text-3xl font-mono font-bold tracking-[0.5em] text-center text-cyan-400">
+              {sessionId}
+            </div>
+          </div>
           <button
-            onClick={copyInviteLink}
+            onClick={copySessionCode}
             className="
               flex items-center justify-center gap-2 mx-auto
               py-2 px-4
@@ -269,7 +474,7 @@ function MatchmakingContent({ queuePosition, sessionId }: MatchmakingContentProp
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
-                COPY INVITE LINK
+                COPY CODE
               </>
             )}
           </button>
@@ -285,10 +490,9 @@ function MatchmakingContent({ queuePosition, sessionId }: MatchmakingContentProp
 
 interface MatchedContentProps {
   opponentName: string | null;
-  onMatchStart: () => void;
 }
 
-function MatchedContent({ opponentName, onMatchStart }: MatchedContentProps) {
+function MatchedContent({ opponentName }: MatchedContentProps) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
@@ -346,27 +550,9 @@ function MatchedContent({ opponentName, onMatchStart }: MatchedContentProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
-        className="flex gap-4"
+        className="text-cyan-400 text-sm font-semibold"
       >
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={onMatchStart}
-          className="
-            flex-1 py-3 px-6
-            text-sm font-bold tracking-wider
-            text-white
-            bg-gradient-to-r from-pink-600 to-cyan-600
-            border border-transparent
-            rounded-lg
-            shadow-[0_0_20px_rgba(0,255,255,0.3)]
-            transition-all duration-200
-            hover:shadow-[0_0_30px_rgba(0,255,255,0.5)]
-            focus:outline-none focus:ring-2 focus:ring-cyan-500/50
-          "
-        >
-          START GAME
-        </motion.button>
+        Starting game...
       </motion.div>
     </motion.div>
   );
