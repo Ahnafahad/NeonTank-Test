@@ -1,65 +1,377 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { useGameStore } from '@/store/useGameStore';
+import { useResponsiveCanvas, useIsMobile } from '@/hooks/useResponsiveCanvas';
+import { Game } from '@/engine/core/Game';
+import { Constants } from '@/engine/utils/Constants';
+import { Vector } from '@/engine/utils/Vector';
+import { MobileControls } from '@/components/mobile';
+import { MatchmakingScreen } from '@/components/menus/MatchmakingScreen';
+import type { AIDifficulty } from '@/engine/ai';
+
+export default function HomePage() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const gameRef = useRef<Game | null>(null);
+  const animationRef = useRef<number | null>(null);
+  const [showAIDifficultySelect, setShowAIDifficultySelect] = useState(false);
+  const [showMatchmaking, setShowMatchmaking] = useState(false);
+  const [aiDifficulty, setAIDifficulty] = useState<AIDifficulty>('medium');
+
+  const {
+    currentScreen,
+    mode,
+    scores,
+    lastWinner,
+    currentStats,
+    startGame,
+    endGame,
+    goToMainMenu,
+    setScreen,
+    setMode,
+    updateStats,
+  } = useGameStore();
+
+  const isMobile = useIsMobile();
+  const { width, height } = useResponsiveCanvas(
+    Constants.GAME_WIDTH,
+    Constants.GAME_HEIGHT,
+    20,
+    80, // Reserved for HUD
+    isMobile ? 200 : 0 // Reserved for mobile controls
+  );
+
+  // Game stats polling
+  const pollGameStats = useCallback(() => {
+    if (gameRef.current && gameRef.current.state === 'playing') {
+      updateStats({
+        p1Health: gameRef.current.getP1Health(),
+        p2Health: gameRef.current.getP2Health(),
+        elapsedTime: gameRef.current.getGameTime(),
+        suddenDeath: gameRef.current.isSuddenDeath(),
+      });
+      animationRef.current = requestAnimationFrame(pollGameStats);
+    } else if (gameRef.current?.state === 'gameover') {
+      const p1Dead = gameRef.current.getP1Health() <= 0;
+      endGame(p1Dead ? 2 : 1);
+    }
+  }, [updateStats, endGame]);
+
+  // Initialize game when entering playing state
+  useEffect(() => {
+    if (currentScreen === 'playing' && canvasRef.current && !gameRef.current) {
+      const settings = mode === 'ai' ? { aiDifficulty } : undefined;
+      gameRef.current = new Game(canvasRef.current, mode, settings);
+      gameRef.current.start();
+      animationRef.current = requestAnimationFrame(pollGameStats);
+    }
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [currentScreen, mode, aiDifficulty, pollGameStats]);
+
+  // Cleanup game on screen change
+  useEffect(() => {
+    if (currentScreen !== 'playing' && gameRef.current) {
+      gameRef.current.destroy();
+      gameRef.current = null;
+    }
+  }, [currentScreen]);
+
+  const handleRematch = () => {
+    if (gameRef.current) {
+      gameRef.current.destroy();
+      gameRef.current = null;
+    }
+    startGame();
+  };
+
+  const handleStartGame = (selectedMode: 'local' | 'ai' | 'online') => {
+    if (selectedMode === 'ai') {
+      setShowAIDifficultySelect(true);
+      return;
+    }
+    if (selectedMode === 'online') {
+      setShowMatchmaking(true);
+      return;
+    }
+    setMode(selectedMode);
+    startGame();
+  };
+
+  const handleOnlineMatchStart = () => {
+    setShowMatchmaking(false);
+    setMode('online');
+    startGame();
+  };
+
+  const handleCancelMatchmaking = () => {
+    setShowMatchmaking(false);
+  };
+
+  const handleStartAIGame = (difficulty: AIDifficulty) => {
+    setAIDifficulty(difficulty);
+    setShowAIDifficultySelect(false);
+    setMode('ai');
+    startGame();
+  };
+
+  // Format time display
+  const formatTime = (ms: number) => {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  // Main Menu Screen
+  if (currentScreen === 'menu') {
+    // Online Matchmaking
+    if (showMatchmaking) {
+      return (
+        <MatchmakingScreen
+          onCancel={handleCancelMatchmaking}
+          onMatchStart={handleOnlineMatchStart}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+      );
+    }
+
+    // AI Difficulty Selection
+    if (showAIDifficultySelect) {
+      return (
+        <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4">
+          <h2 className="text-3xl md:text-4xl font-bold mb-8 text-white uppercase tracking-wider">
+            Select Difficulty
+          </h2>
+
+          <div className="flex flex-col gap-4 w-full max-w-xs">
+            <button
+              onClick={() => handleStartAIGame('easy')}
+              className="px-8 py-4 text-xl font-bold border-2 border-green-500 text-white rounded-full hover:bg-green-500 hover:shadow-[0_0_30px_rgba(34,197,94,0.5)] transition-all duration-200 uppercase tracking-wider"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              Easy
+            </button>
+
+            <button
+              onClick={() => handleStartAIGame('medium')}
+              className="px-8 py-4 text-xl font-bold border-2 border-yellow-500 text-white rounded-full hover:bg-yellow-500 hover:text-black hover:shadow-[0_0_30px_rgba(234,179,8,0.5)] transition-all duration-200 uppercase tracking-wider"
             >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              Medium
+            </button>
+
+            <button
+              onClick={() => handleStartAIGame('hard')}
+              className="px-8 py-4 text-xl font-bold border-2 border-red-500 text-white rounded-full hover:bg-red-500 hover:shadow-[0_0_30px_rgba(239,68,68,0.5)] transition-all duration-200 uppercase tracking-wider"
+            >
+              Hard
+            </button>
+
+            <button
+              onClick={() => setShowAIDifficultySelect(false)}
+              className="px-8 py-4 text-lg font-bold border-2 border-gray-600 text-gray-400 rounded-full hover:border-white hover:text-white transition-all duration-200 uppercase tracking-wider mt-4"
+            >
+              Back
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4">
+        <h1 className="text-4xl md:text-6xl font-bold mb-12 text-center tracking-widest bg-gradient-to-r from-[#ff0055] to-[#00ffff] bg-clip-text text-transparent drop-shadow-lg animate-pulse">
+          NEON TANK DUEL
+        </h1>
+
+        <div className="flex flex-col gap-4 w-full max-w-xs">
+          <button
+            onClick={() => handleStartGame('local')}
+            className="px-8 py-4 text-xl font-bold border-2 border-[#ff0055] text-white rounded-full hover:bg-[#ff0055] hover:shadow-[0_0_30px_#ff0055] transition-all duration-200 uppercase tracking-wider"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            Local 2-Player
+          </button>
+
+          <button
+            onClick={() => handleStartGame('ai')}
+            className="px-8 py-4 text-xl font-bold border-2 border-[#00ffff] text-white rounded-full hover:bg-[#00ffff] hover:text-black hover:shadow-[0_0_30px_#00ffff] transition-all duration-200 uppercase tracking-wider"
+          >
+            VS Computer
+          </button>
+
+          <button
+            onClick={() => handleStartGame('online')}
+            className="px-8 py-4 text-xl font-bold border-2 border-purple-500 text-white rounded-full hover:bg-purple-500 hover:shadow-[0_0_30px_rgba(168,85,247,0.5)] transition-all duration-200 uppercase tracking-wider"
+          >
+            Online Battle
+          </button>
+
+          <button
+            onClick={() => setScreen('options')}
+            className="px-8 py-4 text-xl font-bold border-2 border-gray-500 text-gray-400 rounded-full hover:border-white hover:text-white transition-all duration-200 uppercase tracking-wider"
+          >
+            Options
+          </button>
+        </div>
+
+        <div className="mt-12 text-gray-500 text-center text-sm">
+          <p className="mb-1">Player 1: WASD + SPACE</p>
+          <p>Player 2: Arrows + ENTER</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Options Screen (placeholder)
+  if (currentScreen === 'options') {
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4">
+        <h2 className="text-3xl font-bold mb-8 text-white">Options</h2>
+        <p className="text-gray-400 mb-8">Settings coming soon...</p>
+        <button
+          onClick={goToMainMenu}
+          className="px-6 py-3 border-2 border-white text-white rounded-full hover:bg-white hover:text-black transition-all"
+        >
+          Back to Menu
+        </button>
+      </div>
+    );
+  }
+
+  // Game Over Screen
+  if (currentScreen === 'gameover') {
+    const winnerName = lastWinner === 1
+      ? 'YOU WIN'
+      : (mode === 'ai' ? 'CPU WINS' : 'BLUE WINS');
+
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4">
+        <div className="bg-black/80 backdrop-blur-md p-8 rounded-xl border border-gray-700 text-center">
+          <h2
+            className="text-5xl font-bold mb-4 uppercase"
+            style={{ color: lastWinner === 1 ? '#ff0055' : '#00ffff' }}
+          >
+            {winnerName}!
+          </h2>
+
+          {mode === 'ai' && (
+            <p className="text-gray-400 mb-4 capitalize">
+              Difficulty: {aiDifficulty}
+            </p>
+          )}
+
+          <div className="text-3xl font-bold mb-8">
+            <span className="text-[#ff0055]">{scores.p1}</span>
+            <span className="text-white mx-4">-</span>
+            <span className="text-[#00ffff]">{scores.p2}</span>
+          </div>
+
+          <div className="flex gap-4 justify-center flex-wrap">
+            <button
+              onClick={handleRematch}
+              className="px-8 py-4 text-xl font-bold border-2 border-white text-white rounded-full hover:bg-white hover:text-black transition-all uppercase"
+            >
+              Rematch
+            </button>
+            <button
+              onClick={goToMainMenu}
+              className="px-8 py-4 text-xl font-bold border-2 border-gray-500 text-gray-400 rounded-full hover:border-white hover:text-white transition-all uppercase"
+            >
+              Menu
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Playing Screen
+  return (
+    <div className="min-h-screen max-h-screen bg-[#050505] flex flex-col overflow-hidden">
+      {/* HUD */}
+      <div className="w-full px-4 py-2 flex justify-between items-center shrink-0" style={{ height: '80px' }}>
+        <div className="text-left">
+          <div className="text-[#ff0055] font-bold text-sm mb-1">PLAYER 1</div>
+          <div className="w-32 md:w-48 h-4 bg-black border border-[#ff0055] rounded overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-[#88002d] to-[#ff0055] transition-all duration-200"
+              style={{ width: `${currentStats.p1Health}%` }}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          </div>
         </div>
-      </main>
+
+        <div className="text-center">
+          <div className="text-2xl font-bold">
+            <span className="text-[#ff0055]">{scores.p1}</span>
+            <span className="text-white mx-2">-</span>
+            <span className="text-[#00ffff]">{scores.p2}</span>
+          </div>
+          <div className={`text-sm ${currentStats.suddenDeath ? 'text-red-500 animate-pulse font-bold' : 'text-gray-400'}`}>
+            {currentStats.suddenDeath ? 'SUDDEN DEATH!' : `Time: ${formatTime(currentStats.elapsedTime)}`}
+          </div>
+        </div>
+
+        <div className="text-right">
+          <div className="text-[#00ffff] font-bold text-sm mb-1">
+            {mode === 'ai' ? `CPU (${aiDifficulty.charAt(0).toUpperCase()})` : 'PLAYER 2'}
+          </div>
+          <div className="w-32 md:w-48 h-4 bg-black border border-[#00ffff] rounded overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-[#008888] to-[#00ffff] transition-all duration-200"
+              style={{ width: `${currentStats.p2Health}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Game Canvas - Responsive - Centered */}
+      <div className="flex-1 flex items-center justify-center overflow-hidden">
+        <canvas
+          ref={canvasRef}
+          width={Constants.GAME_WIDTH}
+          height={Constants.GAME_HEIGHT}
+          className="border-2 border-gray-700 shadow-[0_0_30px_rgba(0,255,255,0.1)]"
+          style={{
+            width: `${width}px`,
+            height: `${height}px`,
+            maxWidth: '100%',
+            maxHeight: '100%',
+          }}
+        />
+      </div>
+
+      {/* Mobile Controls */}
+      <MobileControls
+        onP1Move={(vector: Vector) => {
+          gameRef.current?.getInputManager().setJoystickMovement(1, vector);
+        }}
+        onP1MoveEnd={() => {
+          gameRef.current?.getInputManager().resetJoystick(1);
+        }}
+        onP1ShootStart={() => {
+          gameRef.current?.getInputManager().setShootButton(1, true);
+        }}
+        onP1ShootEnd={() => {
+          gameRef.current?.getInputManager().setShootButton(1, false);
+        }}
+        onP2Move={(vector: Vector) => {
+          gameRef.current?.getInputManager().setJoystickMovement(2, vector);
+        }}
+        onP2MoveEnd={() => {
+          gameRef.current?.getInputManager().resetJoystick(2);
+        }}
+        onP2ShootStart={() => {
+          gameRef.current?.getInputManager().setShootButton(2, true);
+        }}
+        onP2ShootEnd={() => {
+          gameRef.current?.getInputManager().setShootButton(2, false);
+        }}
+        p1Reloading={false}
+        p2Reloading={false}
+        p1ChargeLevel={0}
+        p2ChargeLevel={0}
+      />
     </div>
   );
 }
