@@ -5,10 +5,14 @@ interface QueueEntry {
     playerId: string;
     playerName: string;
     timestamp: number;
+    sessionId: string; // Each waiting player gets their own session for invite links
 }
 
 // Global queue storage (in production, use Redis or database)
 const matchmakingQueue: Map<string, QueueEntry> = new Map();
+
+// Track which sessions have waiting players (for invite link support)
+const sessionToPlayer: Map<string, string> = new Map();
 
 export async function POST(request: NextRequest) {
     try {
@@ -24,33 +28,27 @@ export async function POST(request: NextRequest) {
 
         // Check if player is already in queue
         if (matchmakingQueue.has(playerId)) {
-            return NextResponse.json(
-                { error: 'Player already in queue' },
-                { status: 409 }
-            );
+            const existingEntry = matchmakingQueue.get(playerId)!;
+            return NextResponse.json({
+                status: 'queued',
+                sessionId: existingEntry.sessionId,
+                queuePosition: 1,
+                message: 'Already in queue',
+            });
         }
 
-        // Add to queue
-        const entry: QueueEntry = {
-            playerId,
-            playerName: playerName || `Player_${playerId.substring(0, 6)}`,
-            timestamp: Date.now(),
-        };
-        matchmakingQueue.set(playerId, entry);
-
-        // Try to find a match
+        // Try to find a match with existing waiting players
         const queueEntries = Array.from(matchmakingQueue.values())
-            .filter((e) => e.playerId !== playerId)
             .sort((a, b) => a.timestamp - b.timestamp);
 
         if (queueEntries.length > 0) {
-            // Match found! Remove both players from queue
+            // Match found! Remove opponent from queue
             const opponent = queueEntries[0];
-            matchmakingQueue.delete(playerId);
             matchmakingQueue.delete(opponent.playerId);
+            sessionToPlayer.delete(opponent.sessionId);
 
-            // Generate session ID
-            const sessionId = 'session_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+            // Use the opponent's session ID (they created it first)
+            const sessionId = opponent.sessionId;
 
             return NextResponse.json({
                 status: 'matched',
@@ -63,14 +61,23 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        // No match yet, return queue position
-        const queuePosition = Array.from(matchmakingQueue.values())
-            .filter((e) => e.timestamp <= entry.timestamp)
-            .length;
+        // No match yet, create a session and add to queue
+        const sessionId = 'match_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+
+        const entry: QueueEntry = {
+            playerId,
+            playerName: playerName || `Player_${playerId.substring(0, 6)}`,
+            timestamp: Date.now(),
+            sessionId,
+        };
+
+        matchmakingQueue.set(playerId, entry);
+        sessionToPlayer.set(sessionId, playerId);
 
         return NextResponse.json({
             status: 'queued',
-            queuePosition,
+            sessionId, // Return session ID for invite links
+            queuePosition: 1,
             message: 'Waiting for opponent...',
         });
     } catch (error) {
@@ -94,7 +101,11 @@ export async function DELETE(request: NextRequest) {
             );
         }
 
-        matchmakingQueue.delete(playerId);
+        const entry = matchmakingQueue.get(playerId);
+        if (entry) {
+            sessionToPlayer.delete(entry.sessionId);
+            matchmakingQueue.delete(playerId);
+        }
 
         return NextResponse.json({
             status: 'removed',

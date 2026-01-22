@@ -227,25 +227,75 @@ export class NetworkManager {
 
         this.setStatus('matchmaking');
 
-        // Create a unique session ID for this player
-        // Other players can join via matchmaking or invite link
-        const sessionId = 'match_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+        // Use matchmaking API to find or create a match
+        try {
+            const response = await fetch('/api/matchmaking/join', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    playerId: this.playerId,
+                    playerName: this.playerName,
+                }),
+            });
 
-        // Join the session (creates it if it doesn't exist)
-        const session = await this.joinSession(sessionId);
+            const data = await response.json();
 
-        // If we're the only player, poll for opponent via matchmaking
-        if (session.players.length === 1) {
-            this.pollForOpponent(sessionId);
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to join matchmaking');
+            }
+
+            if (data.status === 'matched' && data.sessionId) {
+                // Match found immediately! Join the session
+                return this.joinSession(data.sessionId);
+            } else if (data.status === 'queued' && data.sessionId) {
+                // Waiting for match, join our session and poll for opponent
+                const session = await this.joinSession(data.sessionId);
+
+                // Start polling for opponent
+                if (session.players.length === 1) {
+                    this.pollForOpponent();
+                }
+
+                return session;
+            } else {
+                throw new Error('Unexpected matchmaking response');
+            }
+        } catch (error: any) {
+            this.setStatus('error');
+            throw new Error(error.message || 'Failed to find match');
         }
-
-        return session;
     }
 
-    private pollForOpponent(sessionId: string): void {
-        // Don't use the matchmaking API for now since the invite link allows direct joining
-        // The socket.io server will emit 'player_joined' event when someone joins
-        // This is already handled in registerEventHandlers
+    private pollForOpponent(): void {
+        // Poll matchmaking API every 2 seconds to check if opponent joined
+        const pollInterval = setInterval(async () => {
+            try {
+                // Re-join matchmaking (will return matched if opponent found)
+                const response = await fetch('/api/matchmaking/join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        playerId: this.playerId,
+                        playerName: this.playerName,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'matched' && data.sessionId) {
+                    clearInterval(pollInterval);
+                    // Opponent found! The socket.io 'player_joined' event will handle the rest
+                    console.log('[NetworkManager] Match found via polling!');
+                }
+            } catch (error) {
+                console.error('[NetworkManager] Polling error:', error);
+            }
+        }, 2000);
+
+        // Clean up polling after 5 minutes
+        setTimeout(() => {
+            clearInterval(pollInterval);
+        }, 5 * 60 * 1000);
     }
 
     public async joinSession(sessionId: string): Promise<SessionInfo> {
