@@ -391,6 +391,7 @@ function GameContent() {
         p2Reloading={false}
         p1ChargeLevel={0}
         p2ChargeLevel={0}
+        isOnlineMode={mode === 'online'}
       />
     </div>
   );

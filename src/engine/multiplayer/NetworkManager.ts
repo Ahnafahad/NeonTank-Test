@@ -227,10 +227,25 @@ export class NetworkManager {
 
         this.setStatus('matchmaking');
 
-        // Generate a matchmaking session ID
+        // Create a unique session ID for this player
+        // Other players can join via matchmaking or invite link
         const sessionId = 'match_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
 
-        return this.joinSession(sessionId);
+        // Join the session (creates it if it doesn't exist)
+        const session = await this.joinSession(sessionId);
+
+        // If we're the only player, poll for opponent via matchmaking
+        if (session.players.length === 1) {
+            this.pollForOpponent(sessionId);
+        }
+
+        return session;
+    }
+
+    private pollForOpponent(sessionId: string): void {
+        // Don't use the matchmaking API for now since the invite link allows direct joining
+        // The socket.io server will emit 'player_joined' event when someone joins
+        // This is already handled in registerEventHandlers
     }
 
     public async joinSession(sessionId: string): Promise<SessionInfo> {
@@ -265,6 +280,11 @@ export class NetworkManager {
     }
 
     public leaveMatch(): void {
+        // Leave matchmaking queue
+        fetch(`/api/matchmaking/join?playerId=${this.playerId}`, {
+            method: 'DELETE',
+        }).catch(err => console.error('Failed to leave queue:', err));
+
         if (this.socket && this.sessionId) {
             this.socket.emit('leave_game', {
                 sessionId: this.sessionId,

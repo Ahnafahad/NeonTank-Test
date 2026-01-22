@@ -202,9 +202,12 @@ function MatchmakingContent({ queuePosition, sessionId }: MatchmakingContentProp
   const copyInviteLink = () => {
     if (sessionId && typeof window !== 'undefined') {
       const url = `${window.location.origin}?session=${sessionId}`;
-      navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      navigator.clipboard.writeText(url).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }).catch(err => {
+        console.error('Failed to copy invite link:', err);
+      });
     }
   };
 

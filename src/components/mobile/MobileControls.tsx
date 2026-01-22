@@ -19,6 +19,7 @@ interface MobileControlsProps {
   p2Reloading?: boolean;
   p1ChargeLevel?: number;
   p2ChargeLevel?: number;
+  isOnlineMode?: boolean;
 }
 
 export default function MobileControls({
@@ -34,6 +35,7 @@ export default function MobileControls({
   p2Reloading = false,
   p1ChargeLevel = 0,
   p2ChargeLevel = 0,
+  isOnlineMode = false,
 }: MobileControlsProps) {
   const orientation = useOrientation();
   const isMobile = useIsMobile();
@@ -43,6 +45,43 @@ export default function MobileControls({
 
   const p1Color = '#ff0055';
   const p2Color = '#00ffff';
+
+  // Online mode: Show only P1 controls with joystick on left, shoot button on right
+  if (isOnlineMode) {
+    return (
+      <div
+        className="fixed bottom-0 left-0 right-0 flex items-center justify-between px-6 touch-none"
+        style={{
+          height: '200px',
+          background: 'linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0.7))',
+          borderTop: '1px solid #333',
+        }}
+      >
+        {/* Joystick - Left Side */}
+        <div className="flex items-center justify-center">
+          <Joystick
+            size={120}
+            color={p1Color}
+            playerLabel="P1"
+            onMove={onP1Move}
+            onRelease={onP1MoveEnd}
+          />
+        </div>
+
+        {/* Shoot Button - Right Side */}
+        <div className="flex items-center justify-center">
+          <ShootButton
+            size={80}
+            color={p1Color}
+            onShootStart={onP1ShootStart}
+            onShootEnd={onP1ShootEnd}
+            isReloading={p1Reloading}
+            chargeLevel={p1ChargeLevel}
+          />
+        </div>
+      </div>
+    );
+  }
 
   // Portrait layout: Controls at bottom, split left/right
   if (orientation === 'portrait') {
