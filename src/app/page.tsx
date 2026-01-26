@@ -128,12 +128,16 @@ function GameContent() {
 
       // Merge with mode-specific settings
       if (mode === 'ai') {
-        gameSettings.aiDifficulty = aiDifficulty;
-        gameRef.current = new Game(canvasRef.current, mode, gameSettings);
+        gameRef.current = new Game(canvasRef.current, mode, {
+          ...gameSettings,
+          aiDifficulty,
+        });
       } else if (mode === 'online') {
-        gameSettings.localPlayerControls = onlineControlScheme;
         const networkManager = getNetworkManager();
-        gameRef.current = new Game(canvasRef.current, mode, gameSettings, networkManager);
+        gameRef.current = new Game(canvasRef.current, mode, {
+          ...gameSettings,
+          localPlayerControls: onlineControlScheme,
+        }, networkManager);
       } else {
         gameRef.current = new Game(canvasRef.current, mode, gameSettings);
       }
