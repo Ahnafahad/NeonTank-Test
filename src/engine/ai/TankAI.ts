@@ -13,6 +13,7 @@ export interface AIInput {
   movement: Vector;
   shoot: boolean;
   chargeLevel: number;
+  targetAngle?: number;
 }
 
 type AIState = 'idle' | 'chase' | 'attack' | 'evade' | 'collect' | 'patrol';
@@ -84,7 +85,7 @@ export class TankAI {
     // Reaction delay
     if (this.reactionTimer > 0) {
       this.reactionTimer--;
-      return { movement: Vector.zero(), shoot: false, chargeLevel: 0 };
+      return { movement: Vector.zero(), shoot: false, chargeLevel: 0, targetAngle: undefined };
     }
 
     // Priority-based behavior tree
@@ -124,7 +125,7 @@ export class TankAI {
     if (suddenDeathActive) {
       const escapeMove = this.escapeSuddenDeath(aiTank, suddenDeathInset);
       if (escapeMove) {
-        return { movement: escapeMove, shoot: false, chargeLevel: 0 };
+        return { movement: escapeMove, shoot: false, chargeLevel: 0, targetAngle: undefined };
       }
     }
 
@@ -202,7 +203,7 @@ export class TankAI {
       evadeDir = this.evadeDirection;
     }
 
-    return { movement: evadeDir, shoot: false, chargeLevel: 0 };
+    return { movement: evadeDir, shoot: false, chargeLevel: 0, targetAngle: undefined };
   }
 
   private escapeSuddenDeath(aiTank: Tank, inset: number): Vector | null {
@@ -310,6 +311,7 @@ export class TankAI {
         movement: direction,
         shoot: aimResult.shouldShoot && aimResult.confidence > 0.5,
         chargeLevel: 0,
+        targetAngle: aimResult.targetAngle,
       };
     }
 
@@ -321,6 +323,7 @@ export class TankAI {
       movement: pathDir,
       shoot: aimResult.shouldShoot && aimResult.confidence > 0.5,
       chargeLevel: 0,
+      targetAngle: aimResult.targetAngle,
     };
   }
 
@@ -388,9 +391,9 @@ export class TankAI {
 
       if (chargeLevel >= 1) {
         this.isCharging = false;
-        return { movement, shoot: true, chargeLevel: 1 };
+        return { movement, shoot: true, chargeLevel: 1, targetAngle: aimResult.targetAngle };
       }
-      return { movement, shoot: false, chargeLevel };
+      return { movement, shoot: false, chargeLevel, targetAngle: aimResult.targetAngle };
     } else {
       this.isCharging = false;
     }
@@ -399,6 +402,7 @@ export class TankAI {
       movement,
       shoot: aimResult.shouldShoot,
       chargeLevel: 0,
+      targetAngle: aimResult.targetAngle,
     };
   }
 

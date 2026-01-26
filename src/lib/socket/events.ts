@@ -149,6 +149,11 @@ export interface JoinGamePayload {
   sessionId: string;
   playerId: string;
   playerName: string;
+  gameSettings?: {
+    scoreLimitValue: number;
+    timeLimitEnabled: boolean;
+    timeLimitSeconds: number;
+  };
 }
 
 export interface LeaveGamePayload {

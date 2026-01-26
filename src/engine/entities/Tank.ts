@@ -49,6 +49,9 @@ export class Tank {
   public speedTimer: number;
   public shieldTimer: number;
 
+  // AI Control
+  public isAIControlled: boolean;
+
   constructor(id: number, x: number, y: number, color: string, controls: TankControls) {
     this.id = id;
     this.pos = new Vector(x, y);
@@ -83,6 +86,9 @@ export class Tank {
     // Effect Timers
     this.speedTimer = 0;
     this.shieldTimer = 0;
+
+    // AI Control
+    this.isAIControlled = false;
   }
 
   update(
@@ -156,15 +162,19 @@ export class Tank {
     if (keys[this.controls.right]) moveX = 1;
 
     if (moveX !== 0 || moveY !== 0) {
-      const targetAngle = Math.atan2(moveY, moveX);
-      let diff = targetAngle - this.angle;
-      while (diff <= -Math.PI) diff += Math.PI * 2;
-      while (diff > Math.PI) diff -= Math.PI * 2;
+      // Only rotate based on movement if not AI-controlled
+      // AI sets angle explicitly before update() is called
+      if (!this.isAIControlled) {
+        const targetAngle = Math.atan2(moveY, moveX);
+        let diff = targetAngle - this.angle;
+        while (diff <= -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
 
-      if (Math.abs(diff) < this.rotationSpeed) {
-        this.angle = targetAngle;
-      } else {
-        this.angle += Math.sign(diff) * this.rotationSpeed;
+        if (Math.abs(diff) < this.rotationSpeed) {
+          this.angle = targetAngle;
+        } else {
+          this.angle += Math.sign(diff) * this.rotationSpeed;
+        }
       }
 
       const velocity = new Vector(moveX, moveY).normalize().mult(currentSpeed);

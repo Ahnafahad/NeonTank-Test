@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMultiplayer } from '@/hooks/useMultiplayer';
+import { useSettingsStore } from '@/store/useSettingsStore';
 
 export type ControlScheme = 'wasd' | 'arrows';
 
@@ -18,6 +19,9 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
   const [controlScheme, setControlScheme] = useState<ControlScheme>('wasd');
   const [sessionCode, setSessionCode] = useState(joinSessionId || '');
   const [isJoining, setIsJoining] = useState(!!joinSessionId);
+
+  // Get settings from store
+  const { scoreLimitValue, timeLimitEnabled, timeLimitSeconds } = useSettingsStore();
 
   const {
     connectionStatus,
@@ -51,7 +55,11 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
 
         if (isJoining && sessionCode) {
           console.log('[MatchmakingScreen] Joining session:', sessionCode);
-          await joinSession(sessionCode);
+          await joinSession(sessionCode, {
+            scoreLimitValue,
+            timeLimitEnabled,
+            timeLimitSeconds,
+          });
         } else {
           console.log('[MatchmakingScreen] Finding match...');
           await findMatch();

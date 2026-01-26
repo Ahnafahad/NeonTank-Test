@@ -311,7 +311,10 @@ export class NetworkManager {
         }, 5 * 60 * 1000);
     }
 
-    public async joinSession(sessionId: string): Promise<SessionInfo> {
+    public async joinSession(
+        sessionId: string,
+        gameSettings?: { scoreLimitValue: number; timeLimitEnabled: boolean; timeLimitSeconds: number }
+    ): Promise<SessionInfo> {
         return new Promise((resolve, reject) => {
             if (!this.socket?.connected) {
                 reject(new Error('Not connected to server'));
@@ -322,6 +325,7 @@ export class NetworkManager {
                 sessionId,
                 playerId: this.playerId,
                 playerName: this.playerName,
+                gameSettings,
             }, (response) => {
                 if (response.success && response.session) {
                     this.sessionId = sessionId;

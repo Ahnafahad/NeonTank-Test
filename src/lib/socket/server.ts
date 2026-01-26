@@ -72,6 +72,12 @@ export interface GameSession {
   lastPowerUpTime: number;
   suddenDeathActive: boolean;
   suddenDeathInset: number;
+  // Game settings
+  settings?: {
+    scoreLimitValue: number;
+    timeLimitEnabled: boolean;
+    timeLimitSeconds: number;
+  };
 }
 
 // ============================================================================
@@ -248,7 +254,7 @@ export function initializeSocketServer(httpServer: NetServer): NeonTankServer {
     // ========================================================================
 
     socket.on('join_game', (payload, callback) => {
-      const { sessionId, playerId, playerName } = payload;
+      const { sessionId, playerId, playerName, gameSettings } = payload;
 
       console.log(`[Socket.io] Player ${playerId} (${playerName}) joining session ${sessionId}`);
 
@@ -256,6 +262,15 @@ export function initializeSocketServer(httpServer: NetServer): NeonTankServer {
       let session = sessionManager.getSession(sessionId);
       if (!session) {
         session = sessionManager.createSession(sessionId);
+      }
+
+      // Store game settings (first player to join sets the settings)
+      if (!session.settings && gameSettings) {
+        session.settings = {
+          scoreLimitValue: gameSettings.scoreLimitValue || 5,
+          timeLimitEnabled: gameSettings.timeLimitEnabled || false,
+          timeLimitSeconds: gameSettings.timeLimitSeconds || 120,
+        };
       }
 
       // Check if session is full
@@ -678,6 +693,7 @@ function startGame(sessionId: string): void {
   if (!session || !io) return;
 
   session.gameState = 'playing';
+  session.gameStartTime = Date.now(); // Initialize timer
 
   io.to(sessionId).emit('round_start', {
     sessionId,
@@ -696,6 +712,44 @@ function processGameTick(sessionId: string): void {
   if (!session || !io) return;
 
   session.currentTick++;
+
+  // Check timer win condition
+  if (session.settings?.timeLimitEnabled) {
+    const elapsed = Date.now() - session.gameStartTime;
+    const timeLimit = session.settings.timeLimitSeconds * 1000;
+
+    if (elapsed >= timeLimit) {
+      // Time expired - determine winner by score then health
+      let winnerId: number;
+
+      if (session.scores.p1 > session.scores.p2) {
+        winnerId = 1;
+      } else if (session.scores.p2 > session.scores.p1) {
+        winnerId = 2;
+      } else {
+        // Tied score - use health tiebreaker
+        const p1Tank = session.tanks.get(1);
+        const p2Tank = session.tanks.get(2);
+
+        if (p1Tank && p2Tank) {
+          if (p1Tank.health > p2Tank.health) {
+            winnerId = 1;
+          } else if (p2Tank.health > p1Tank.health) {
+            winnerId = 2;
+          } else {
+            // Perfect tie - random winner
+            winnerId = Math.random() < 0.5 ? 1 : 2;
+          }
+        } else {
+          // Fallback if tanks don't exist
+          winnerId = 1;
+        }
+      }
+
+      endRound(sessionId, winnerId);
+      return; // Stop processing this tick
+    }
+  }
 
   // Process player inputs and update tanks
   const lastProcessedInput: { [playerId: string]: number } = {};
@@ -890,9 +944,10 @@ function endRound(sessionId: string, winnerId: number): void {
     scores: session.scores,
   });
 
-  // Check if game should end (best of 3, first to 2 wins)
-  if (session.scores.p1 >= 2 || session.scores.p2 >= 2) {
-    endGame(sessionId, session.scores.p1 >= 2 ? 1 : 2);
+  // Check if game should end based on score limit
+  const scoreLimit = session.settings?.scoreLimitValue || 2; // Default to 2 if not set
+  if (session.scores.p1 >= scoreLimit || session.scores.p2 >= scoreLimit) {
+    endGame(sessionId, session.scores.p1 >= scoreLimit ? 1 : 2);
   } else {
     // Start next round after delay
     setTimeout(() => {
@@ -909,6 +964,7 @@ function startNextRound(sessionId: string): void {
   initializeGameEntities(session);
 
   session.gameState = 'playing';
+  session.gameStartTime = Date.now(); // Initialize timer for new round
 
   io.to(sessionId).emit('round_start', {
     sessionId,

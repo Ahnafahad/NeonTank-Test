@@ -156,14 +156,17 @@ export function useMultiplayer() {
     }, [setConnectionStatus, setQueuePosition, setSessionInfo, setOpponent, setError]);
 
     // Join specific session
-    const joinSession = useCallback(async (sessionId: string) => {
+    const joinSession = useCallback(async (
+        sessionId: string,
+        gameSettings?: { scoreLimitValue: number; timeLimitEnabled: boolean; timeLimitSeconds: number }
+    ) => {
         if (!networkManagerRef.current) return;
 
         try {
-            console.log('[useMultiplayer] Joining session:', sessionId);
+            console.log('[useMultiplayer] Joining session:', sessionId, 'with settings:', gameSettings);
             setConnectionStatus('matchmaking');
 
-            const session = await networkManagerRef.current.joinSession(sessionId);
+            const session = await networkManagerRef.current.joinSession(sessionId, gameSettings);
             console.log('[useMultiplayer] Joined session:', session);
             setSessionInfo(session.sessionId, networkManagerRef.current.getPlayerId());
 

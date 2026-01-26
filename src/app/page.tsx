@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useGameStore } from '@/store/useGameStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
 import { useResponsiveCanvas, useIsMobile } from '@/hooks/useResponsiveCanvas';
 import { Game } from '@/engine/core/Game';
 import { Constants } from '@/engine/utils/Constants';
@@ -47,6 +48,9 @@ function GameContent() {
     updateStats,
   } = useGameStore();
 
+  // Get all settings from store
+  const settingsStore = useSettingsStore();
+
   // Auto-join if session ID is present
   useEffect(() => {
     if (joinSessionId && !showMatchmaking && currentScreen === 'menu') {
@@ -82,16 +86,56 @@ function GameContent() {
   // Initialize game when entering playing state
   useEffect(() => {
     if (currentScreen === 'playing' && canvasRef.current && !gameRef.current) {
-      let settings = undefined;
+      // Get snapshot of all settings from store
+      const gameSettings = {
+        charging: settingsStore.charging,
+        ammoSystem: settingsStore.ammoSystem,
+        powerUps: settingsStore.powerUps,
+        destructibleCrates: settingsStore.destructibleCrates,
+        hazards: settingsStore.hazards,
+        suddenDeath: settingsStore.suddenDeath,
+        bulletRicochet: settingsStore.bulletRicochet,
+        recoil: settingsStore.recoil,
+        particleEffects: settingsStore.particleEffects,
+        soundEffects: settingsStore.soundEffects,
+        bulletTrails: settingsStore.bulletTrails,
+        bulletTrailLength: settingsStore.bulletTrailLength,
+        screenShake: settingsStore.screenShake,
+        screenShakeIntensity: settingsStore.screenShakeIntensity,
+        weather: settingsStore.weather,
+        particleDensity: settingsStore.particleDensity,
+        damageNumbers: settingsStore.damageNumbers,
+        friendlyFire: settingsStore.friendlyFire,
+        gameSpeed: settingsStore.gameSpeed,
+        unlimitedAmmo: settingsStore.unlimitedAmmo,
+        lowGravity: settingsStore.lowGravity,
+        maxBounces: settingsStore.maxBounces,
+        startingHealth: settingsStore.startingHealth,
+        mapVariant: settingsStore.mapVariant,
+        powerupSpawnRate: settingsStore.powerupSpawnRate,
+        timeLimitEnabled: settingsStore.timeLimitEnabled,
+        timeLimitSeconds: settingsStore.timeLimitSeconds,
+        scoreLimitEnabled: settingsStore.scoreLimitEnabled,
+        scoreLimitValue: settingsStore.scoreLimitValue,
+        minimap: settingsStore.minimap,
+        killcam: settingsStore.killcam,
+        musicEnabled: settingsStore.musicEnabled,
+        musicVolume: settingsStore.musicVolume,
+        sfxVolume: settingsStore.sfxVolume,
+        colorblindMode: settingsStore.colorblindMode,
+        aiDifficulty: 'medium' as AIDifficulty, // Default, will be overridden for AI mode
+      };
+
+      // Merge with mode-specific settings
       if (mode === 'ai') {
-        settings = { aiDifficulty };
-        gameRef.current = new Game(canvasRef.current, mode, settings);
+        gameSettings.aiDifficulty = aiDifficulty;
+        gameRef.current = new Game(canvasRef.current, mode, gameSettings);
       } else if (mode === 'online') {
-        settings = { localPlayerControls: onlineControlScheme };
+        gameSettings.localPlayerControls = onlineControlScheme;
         const networkManager = getNetworkManager();
-        gameRef.current = new Game(canvasRef.current, mode, settings, networkManager);
+        gameRef.current = new Game(canvasRef.current, mode, gameSettings, networkManager);
       } else {
-        gameRef.current = new Game(canvasRef.current, mode, settings);
+        gameRef.current = new Game(canvasRef.current, mode, gameSettings);
       }
 
       gameRef.current.start();
@@ -103,7 +147,7 @@ function GameContent() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [currentScreen, mode, aiDifficulty, onlineControlScheme, pollGameStats]);
+  }, [currentScreen, mode, aiDifficulty, onlineControlScheme, pollGameStats, settingsStore]);
 
   // Cleanup game on screen change
   useEffect(() => {

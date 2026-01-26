@@ -53,6 +53,15 @@ export interface GameSettings {
   particleEffects: boolean;
   soundEffects: boolean;
 
+  // Visual effects
+  bulletTrails: boolean;
+  bulletTrailLength: number;
+  screenShake: boolean;
+  screenShakeIntensity: number;
+  weather: string;
+  particleDensity: number;
+  damageNumbers: boolean;
+
   // Gameplay modification features
   friendlyFire: boolean;
   gameSpeed: number;
@@ -61,6 +70,25 @@ export interface GameSettings {
   maxBounces: number;
   startingHealth: number;
   powerupSpawnRate: number;
+  mapVariant: string;
+
+  // Game rules
+  timeLimitEnabled: boolean;
+  timeLimitSeconds: number;
+  scoreLimitEnabled: boolean;
+  scoreLimitValue: number;
+
+  // UI features
+  minimap: boolean;
+  killcam: boolean;
+
+  // Audio
+  musicEnabled: boolean;
+  musicVolume: number;
+  sfxVolume: number;
+
+  // Accessibility
+  colorblindMode: string;
 
   // AI settings
   aiDifficulty: AIDifficulty;
@@ -114,7 +142,8 @@ export class Game {
   private readonly INTERPOLATION_DELAY = 100; // 100ms buffer for smooth interpolation
   private readonly MAX_BUFFER_SIZE = 10; // Keep last 10 server states
   private lastServerState: GameStateSnapshot | null = null;
-  private reconciliationThreshold = 5; // Position difference threshold for reconciliation (pixels)
+  private readonly RECONCILIATION_THRESHOLD_SMOOTH = 10; // Smooth correction for small errors (pixels)
+  private readonly RECONCILIATION_THRESHOLD_SNAP = 50; // Instant snap for large errors (pixels)
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -141,14 +170,32 @@ export class Game {
       bulletRicochet: true,
       recoil: true,
       particleEffects: true,
-      soundEffects: false, // Disabled for now
+      soundEffects: false,
+      bulletTrails: true,
+      bulletTrailLength: 10,
+      screenShake: true,
+      screenShakeIntensity: 1.0,
+      weather: 'none',
+      particleDensity: 100,
+      damageNumbers: true,
       friendlyFire: false,
       gameSpeed: 1.0,
       unlimitedAmmo: false,
       lowGravity: false,
       maxBounces: Constants.BULLET_MAX_BOUNCES,
       startingHealth: Constants.TANK_MAX_HEALTH,
-      powerupSpawnRate: Constants.POWERUP_SPAWN_INTERVAL / 1000, // Convert ms to seconds
+      powerupSpawnRate: Constants.POWERUP_SPAWN_INTERVAL / 1000,
+      mapVariant: 'classic',
+      timeLimitEnabled: false,
+      timeLimitSeconds: 120,
+      scoreLimitEnabled: false,
+      scoreLimitValue: 5,
+      minimap: false,
+      killcam: false,
+      musicEnabled: false,
+      musicVolume: 70,
+      sfxVolume: 70,
+      colorblindMode: 'none',
       aiDifficulty: 'medium',
       ...settings,
     };
@@ -195,6 +242,11 @@ export class Game {
 
     this.p1 = new Tank(1, 100, 350, Constants.PLAYER1_COLOR, p1Controls);
     this.p2 = new Tank(2, 900, 350, Constants.PLAYER2_COLOR, p2Controls);
+
+    // Mark P2 as AI-controlled if in AI mode
+    if (this.mode === 'ai') {
+      this.p2.isAIControlled = true;
+    }
 
     this.gameStartTime = Date.now();
     this.suddenDeathActive = false;
@@ -408,9 +460,10 @@ export class Game {
       Math.pow(localTank.pos.x - serverTank.x, 2) + Math.pow(localTank.pos.y - serverTank.y, 2)
     );
 
-    // If error exceeds threshold, reconcile by resetting to server state
-    if (positionError > this.reconciliationThreshold) {
-      console.log(`[Prediction] Reconciling: error=${positionError.toFixed(2)}px`);
+    // Hybrid reconciliation based on error magnitude
+    if (positionError > this.RECONCILIATION_THRESHOLD_SNAP) {
+      // Large error - instant snap + replay to prevent major desync
+      console.log(`[Reconciliation] SNAP: error=${positionError.toFixed(2)}px`);
 
       // Reset to server state
       localTank.pos.x = serverTank.x;
@@ -432,8 +485,36 @@ export class Game {
 
       // Replay unprocessed inputs on top of server state
       this.replayPredictions();
+    } else if (positionError > this.RECONCILIATION_THRESHOLD_SMOOTH) {
+      // Small error - smooth correction without replay
+      console.log(`[Reconciliation] SMOOTH: error=${positionError.toFixed(2)}px`);
+
+      const alpha = 0.3; // 30% correction per update
+      localTank.pos.x += (serverTank.x - localTank.pos.x) * alpha;
+      localTank.pos.y += (serverTank.y - localTank.pos.y) * alpha;
+
+      // Smooth angle correction
+      const angleDiff = serverTank.angle - localTank.angle;
+      const normalizedDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
+      localTank.angle += normalizedDiff * alpha;
+
+      // Update non-predicted properties
+      localTank.health = serverTank.health;
+      localTank.ammo = serverTank.ammo;
+      localTank.currentWeapon = serverTank.currentWeapon;
+      localTank.speedTimer = serverTank.speedTimer;
+      localTank.shieldTimer = serverTank.shieldTimer;
+      localTank.weaponTimer = serverTank.weaponTimer;
+      localTank.isReloading = serverTank.isReloading;
+      if (serverTank.isReloading && serverTank.reloadProgress !== undefined) {
+        localTank.reloadTimer = localTank.reloadDuration * (1 - serverTank.reloadProgress);
+      }
+      localTank.dead = serverTank.dead;
+
+      // Don't replay predictions for small corrections
     } else {
-      // Small error - just update non-predicted properties
+      // Error < 10px - no position correction needed
+      // Just update non-predicted properties
       localTank.health = serverTank.health;
       localTank.ammo = serverTank.ammo;
       localTank.currentWeapon = serverTank.currentWeapon;
@@ -724,6 +805,12 @@ export class Game {
         this.suddenDeathActive,
         this.suddenDeathInset
       );
+
+      // Apply AI aiming angle before tank update
+      if (aiInput.targetAngle !== undefined) {
+        this.p2.angle = aiInput.targetAngle;
+      }
+
       p2Keys = {
         ...keys,
         ...this.tankAI.getVirtualKeyState(aiInput, this.p2.controls),
@@ -751,6 +838,33 @@ export class Game {
         this.suddenDeathActive = true;
       }
       this.suddenDeathInset += Constants.SUDDEN_DEATH_INSET_SPEED * deltaMultiplier;
+    }
+
+    // Check time limit win condition (local/AI mode only - server handles online mode)
+    if (this.settings.timeLimitEnabled && this.mode !== 'online') {
+      const timeLimit = this.settings.timeLimitSeconds * 1000;
+      if (elapsed >= timeLimit) {
+        // Time expired - determine winner
+        let winnerId: number;
+
+        if (this.scores.p1 > this.scores.p2) {
+          winnerId = 1;
+        } else if (this.scores.p2 > this.scores.p1) {
+          winnerId = 2;
+        } else {
+          // Tied score - use health tiebreaker
+          if (this.p1.health > this.p2.health) {
+            winnerId = 1;
+          } else if (this.p2.health > this.p1.health) {
+            winnerId = 2;
+          } else {
+            // Perfect tie - random winner
+            winnerId = Math.random() < 0.5 ? 1 : 2;
+          }
+        }
+
+        this.endGame(winnerId);
+      }
     }
 
     // PowerUp Spawner - use settings.powerupSpawnRate (in seconds)
