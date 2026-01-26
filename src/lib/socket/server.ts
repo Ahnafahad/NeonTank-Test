@@ -12,7 +12,17 @@ import {
   GameStateSnapshot,
   PlayerInput,
   SerializedTank,
+  SerializedBullet,
+  SerializedPowerUp,
+  SerializedWall,
+  SerializedHazard,
 } from './events';
+import { Tank, TankControls } from '@/engine/entities/Tank';
+import { Bullet } from '@/engine/entities/Bullet';
+import { PowerUp, PowerUpType } from '@/engine/entities/PowerUp';
+import { Wall } from '@/engine/entities/Wall';
+import { Hazard } from '@/engine/entities/Hazard';
+import { Constants } from '@/engine/utils/Constants';
 
 // ============================================================================
 // Types
@@ -50,6 +60,18 @@ export interface GameSession {
   lastActivity: number;
   roundNumber: number;
   scores: { p1: number; p2: number };
+  // Game entities
+  tanks: Map<number, Tank>; // tankId -> Tank
+  bullets: Bullet[];
+  powerups: PowerUp[];
+  walls: Wall[];
+  crates: Wall[];
+  hazards: Hazard[];
+  // Game state
+  gameStartTime: number;
+  lastPowerUpTime: number;
+  suddenDeathActive: boolean;
+  suddenDeathInset: number;
 }
 
 // ============================================================================
@@ -75,6 +97,18 @@ class SessionManager {
       lastActivity: Date.now(),
       roundNumber: 0,
       scores: { p1: 0, p2: 0 },
+      // Game entities
+      tanks: new Map(),
+      bullets: [],
+      powerups: [],
+      walls: [],
+      crates: [],
+      hazards: [],
+      // Game state
+      gameStartTime: Date.now(),
+      lastPowerUpTime: Date.now(),
+      suddenDeathActive: false,
+      suddenDeathInset: 0,
     };
 
     this.sessions.set(sessionId, session);
@@ -439,12 +473,171 @@ function handlePlayerLeave(
   }
 }
 
+// ============================================================================
+// Game State Management
+// ============================================================================
+
+function initializeGameEntities(session: GameSession): void {
+  // Clear existing entities
+  session.tanks.clear();
+  session.bullets = [];
+  session.powerups = [];
+  session.walls = [];
+  session.crates = [];
+  session.hazards = [];
+
+  // Create tanks for each player
+  const players = Array.from(session.players.values());
+  for (const player of players) {
+    const controls: TankControls = {
+      up: 'KeyW',
+      down: 'KeyS',
+      left: 'KeyA',
+      right: 'KeyD',
+      shoot: 'Space',
+    };
+
+    const x = player.tankId === 1 ? 100 : 900;
+    const y = 350;
+    const color = player.tankId === 1 ? Constants.PLAYER1_COLOR : Constants.PLAYER2_COLOR;
+
+    const tank = new Tank(player.tankId, x, y, color, controls);
+    session.tanks.set(player.tankId, tank);
+  }
+
+  // Create map - Static Walls
+  session.walls.push(new Wall(450, 300, 100, 100)); // Center
+
+  session.walls.push(new Wall(150, 100, 50, 150));
+  session.walls.push(new Wall(800, 100, 50, 150));
+  session.walls.push(new Wall(150, 450, 50, 150));
+  session.walls.push(new Wall(800, 450, 50, 150));
+
+  // Hazard Zones
+  session.hazards.push(new Hazard(425, 50, 150, 100, 'RADIATION'));
+  session.hazards.push(new Hazard(425, 550, 150, 100, 'RADIATION'));
+
+  // Destructible Crates
+  session.crates.push(new Wall(250, 200, 40, 40, true));
+  session.crates.push(new Wall(250, 460, 40, 40, true));
+  session.crates.push(new Wall(710, 200, 40, 40, true));
+  session.crates.push(new Wall(710, 460, 40, 40, true));
+  session.crates.push(new Wall(450, 200, 100, 40, true));
+  session.crates.push(new Wall(450, 460, 100, 40, true));
+
+  // Reset game state
+  session.gameStartTime = Date.now();
+  session.lastPowerUpTime = Date.now();
+  session.suddenDeathActive = false;
+  session.suddenDeathInset = 0;
+}
+
+function spawnPowerUp(session: GameSession): void {
+  if (session.powerups.length >= Constants.POWERUP_MAX_COUNT) return;
+
+  // Find empty spot
+  const x = Math.random() * (Constants.GAME_WIDTH - 100) + 50;
+  const y = Math.random() * (Constants.GAME_HEIGHT - 100) + 50;
+
+  // Check collision with walls/crates
+  const allWalls = [...session.walls, ...session.crates];
+  for (const w of allWalls) {
+    if (
+      w.active &&
+      x > w.x - 20 &&
+      x < w.x + w.w + 20 &&
+      y > w.y - 20 &&
+      y < w.y + w.h + 20
+    )
+      return;
+  }
+
+  const types: PowerUpType[] = ['HEALTH', 'SPEED', 'SHOTGUN', 'LASER', 'SHIELD'];
+  const type = types[Math.floor(Math.random() * types.length)];
+  session.powerups.push(new PowerUp(x, y, type));
+}
+
+function serializeTank(tank: Tank): SerializedTank {
+  return {
+    id: tank.id,
+    x: tank.pos.x,
+    y: tank.pos.y,
+    angle: tank.angle,
+    health: tank.health,
+    maxHealth: tank.maxHealth,
+    ammo: tank.ammo,
+    maxAmmo: tank.maxAmmo,
+    isReloading: tank.isReloading,
+    reloadProgress: tank.isReloading ? (tank.reloadTimer / tank.reloadDuration) : 0,
+    chargeLevel: tank.chargeLevel,
+    isCharging: tank.isCharging,
+    currentWeapon: tank.currentWeapon,
+    speedTimer: tank.speedTimer,
+    shieldTimer: tank.shieldTimer,
+    weaponTimer: tank.weaponTimer,
+    dead: tank.dead,
+    color: tank.color,
+  };
+}
+
+function serializeBullet(bullet: Bullet): SerializedBullet {
+  return {
+    id: `${bullet.ownerId}-${Date.now()}-${Math.random()}`,
+    x: bullet.pos.x,
+    y: bullet.pos.y,
+    velX: bullet.vel.x,
+    velY: bullet.vel.y,
+    radius: bullet.radius,
+    color: bullet.color,
+    ownerId: bullet.ownerId,
+    type: bullet.type,
+    bounces: bullet.bounces,
+  };
+}
+
+function serializePowerUp(powerup: PowerUp): SerializedPowerUp {
+  return {
+    id: `powerup-${powerup.pos.x}-${powerup.pos.y}`,
+    x: powerup.pos.x,
+    y: powerup.pos.y,
+    type: powerup.type,
+    active: powerup.active,
+  };
+}
+
+function serializeWall(wall: Wall, index: number): SerializedWall {
+  return {
+    id: `wall-${index}`,
+    x: wall.x,
+    y: wall.y,
+    w: wall.w,
+    h: wall.h,
+    active: wall.active,
+    health: wall.destructible ? wall.health : undefined,
+    maxHealth: wall.destructible ? Constants.WALL_HEALTH : undefined,
+    destructible: wall.destructible,
+  };
+}
+
+function serializeHazard(hazard: Hazard, index: number): SerializedHazard {
+  return {
+    id: `hazard-${index}`,
+    x: hazard.x,
+    y: hazard.y,
+    radius: Math.sqrt(hazard.w * hazard.h) / 2,
+    type: hazard.type,
+  };
+}
+
 function startGameCountdown(sessionId: string): void {
   const session = sessionManager.getSession(sessionId);
   if (!session || !io) return;
 
   session.gameState = 'countdown';
   session.roundNumber = 1;
+
+  // Initialize game entities
+  initializeGameEntities(session);
 
   let countdown = 3;
 
@@ -504,36 +697,168 @@ function processGameTick(sessionId: string): void {
 
   session.currentTick++;
 
-  // Process inputs and update game state
-  // This is a placeholder - actual game logic will be integrated later
+  // Process player inputs and update tanks
   const lastProcessedInput: { [playerId: string]: number } = {};
+  const gameSettings = {
+    ammoSystem: true,
+    charging: true,
+    recoil: true,
+  };
 
   for (const [playerId, inputs] of session.inputBuffer) {
     if (inputs.length > 0) {
-      const lastInput = inputs[inputs.length - 1];
-      lastProcessedInput[playerId] = lastInput.sequenceNumber;
+      // Process the most recent input
+      const input = inputs[inputs.length - 1];
+      lastProcessedInput[playerId] = input.sequenceNumber;
+
+      // Find the player's tank
+      const player = session.players.get(playerId);
+      if (player) {
+        const tank = session.tanks.get(player.tankId);
+        if (tank && !tank.dead) {
+          // Convert PlayerInput to key state
+          const keys: { [key: string]: boolean } = {};
+
+          // Map movement to keys
+          if (input.movement.y < -0.1) keys['KeyW'] = true;
+          if (input.movement.y > 0.1) keys['KeyS'] = true;
+          if (input.movement.x < -0.1) keys['KeyA'] = true;
+          if (input.movement.x > 0.1) keys['KeyD'] = true;
+
+          // Map shooting
+          if (input.shoot) keys['Space'] = true;
+
+          // Set charge level
+          if (input.chargeLevel > 0) {
+            tank.chargeLevel = input.chargeLevel;
+          }
+
+          // Get the other tank for collision detection
+          const otherTankId = player.tankId === 1 ? 2 : 1;
+          const otherTank = session.tanks.get(otherTankId);
+
+          if (otherTank) {
+            // Update tank and get new bullets
+            const newBullets = tank.update(
+              keys,
+              session.walls,
+              session.crates,
+              session.hazards,
+              otherTank,
+              session.suddenDeathActive,
+              session.suddenDeathInset,
+              gameSettings,
+              1.0 // deltaMultiplier
+            );
+            session.bullets.push(...newBullets);
+          }
+        }
+      }
+
       // Clear processed inputs
       inputs.length = 0;
     }
   }
 
-  // Create state snapshot
-  // This is a placeholder - actual state will come from game engine
+  // Update bullets
+  for (let i = session.bullets.length - 1; i >= 0; i--) {
+    const bullet = session.bullets[i];
+    bullet.update(session.walls, session.crates);
+
+    if (!bullet.active) {
+      session.bullets.splice(i, 1);
+      continue;
+    }
+
+    // Bullet-tank collision detection
+    for (const [tankId, tank] of session.tanks) {
+      if (tank.dead) continue;
+      if (bullet.ownerId === tankId) continue; // No friendly fire
+
+      // Simple AABB collision
+      if (
+        bullet.pos.x > tank.pos.x - 18 &&
+        bullet.pos.x < tank.pos.x + 18 &&
+        bullet.pos.y > tank.pos.y - 18 &&
+        bullet.pos.y < tank.pos.y + 18
+      ) {
+        tank.hit();
+        bullet.active = false;
+
+        // Check if tank died
+        if (tank.dead) {
+          // Update scores
+          const winnerId = tankId === 1 ? 2 : 1;
+          if (winnerId === 1) {
+            session.scores.p1++;
+          } else {
+            session.scores.p2++;
+          }
+
+          // End round
+          endRound(sessionId, winnerId);
+        }
+        break;
+      }
+    }
+
+    if (!bullet.active) {
+      session.bullets.splice(i, 1);
+    }
+  }
+
+  // Update power-ups
+  for (const powerup of session.powerups) {
+    powerup.update();
+  }
+
+  // Power-up collection
+  for (let i = session.powerups.length - 1; i >= 0; i--) {
+    const powerup = session.powerups[i];
+
+    for (const [tankId, tank] of session.tanks) {
+      if (tank.dead) continue;
+
+      if (powerup.isCollidingWith(tank.pos, 25)) {
+        tank.applyPowerUp(powerup.type);
+        session.powerups.splice(i, 1);
+        break;
+      }
+    }
+  }
+
+  // Power-up spawning
+  const elapsed = Date.now() - session.lastPowerUpTime;
+  if (elapsed > Constants.POWERUP_SPAWN_INTERVAL) {
+    spawnPowerUp(session);
+    session.lastPowerUpTime = Date.now();
+  }
+
+  // Sudden death logic
+  const gameTime = Date.now() - session.gameStartTime;
+  if (gameTime > Constants.SUDDEN_DEATH_TIME) {
+    if (!session.suddenDeathActive) {
+      session.suddenDeathActive = true;
+    }
+    session.suddenDeathInset += Constants.SUDDEN_DEATH_INSET_SPEED;
+  }
+
+  // Create state snapshot from actual game entities
   const stateSnapshot: GameStateSnapshot = {
     tick: session.currentTick,
     timestamp: Date.now(),
     lastProcessedInput,
-    tanks: createPlaceholderTanks(session),
-    bullets: [],
-    powerups: [],
-    walls: [],
-    hazards: [],
+    tanks: Array.from(session.tanks.values()).map(serializeTank),
+    bullets: session.bullets.map(serializeBullet),
+    powerups: session.powerups.map(serializePowerUp),
+    walls: [...session.walls, ...session.crates].map(serializeWall),
+    hazards: session.hazards.map(serializeHazard),
     scores: session.scores,
-    gameTime: (Date.now() - session.createdAt) / 1000,
-    suddenDeath: false,
-    suddenDeathInset: 0,
+    gameTime: gameTime / 1000,
+    suddenDeath: session.suddenDeathActive,
+    suddenDeathInset: session.suddenDeathInset,
     roundNumber: session.roundNumber,
-    roundActive: true,
+    roundActive: session.gameState === 'playing',
   };
 
   session.stateSnapshot = stateSnapshot;
@@ -545,34 +870,75 @@ function processGameTick(sessionId: string): void {
   });
 }
 
-function createPlaceholderTanks(session: GameSession): SerializedTank[] {
-  const tanks: SerializedTank[] = [];
+function endRound(sessionId: string, winnerId: number): void {
+  const session = sessionManager.getSession(sessionId);
+  if (!session || !io) return;
 
-  for (const player of session.players.values()) {
-    tanks.push({
-      id: player.tankId,
-      x: player.tankId === 1 ? 100 : 700,
-      y: 300,
-      angle: player.tankId === 1 ? 0 : Math.PI,
-      health: 100,
-      maxHealth: 100,
-      ammo: 5,
-      maxAmmo: 5,
-      isReloading: false,
-      reloadProgress: 0,
-      chargeLevel: 0,
-      isCharging: false,
-      currentWeapon: 'NORMAL',
-      speedTimer: 0,
-      shieldTimer: 0,
-      weaponTimer: 0,
-      dead: false,
-      color: player.tankId === 1 ? '#00ff88' : '#ff0088',
-    });
+  // Stop game tick
+  if (session.tickInterval) {
+    clearInterval(session.tickInterval);
+    session.tickInterval = null;
   }
 
-  return tanks;
+  session.gameState = 'round_over';
+
+  // Notify clients
+  io.to(sessionId).emit('round_over', {
+    sessionId,
+    roundNumber: session.roundNumber,
+    winner: winnerId,
+    scores: session.scores,
+  });
+
+  // Check if game should end (best of 3, first to 2 wins)
+  if (session.scores.p1 >= 2 || session.scores.p2 >= 2) {
+    endGame(sessionId, session.scores.p1 >= 2 ? 1 : 2);
+  } else {
+    // Start next round after delay
+    setTimeout(() => {
+      startNextRound(sessionId);
+    }, 3000);
+  }
 }
+
+function startNextRound(sessionId: string): void {
+  const session = sessionManager.getSession(sessionId);
+  if (!session || !io) return;
+
+  session.roundNumber++;
+  initializeGameEntities(session);
+
+  session.gameState = 'playing';
+
+  io.to(sessionId).emit('round_start', {
+    sessionId,
+    roundNumber: session.roundNumber,
+    countdown: 0,
+  });
+
+  // Restart game tick
+  session.tickInterval = setInterval(() => {
+    processGameTick(sessionId);
+  }, 1000 / session.tickRate);
+}
+
+function endGame(sessionId: string, winnerId: number): void {
+  const session = sessionManager.getSession(sessionId);
+  if (!session || !io) return;
+
+  session.gameState = 'game_over';
+
+  io.to(sessionId).emit('game_over', {
+    sessionId,
+    winner: winnerId,
+    finalScores: session.scores,
+    stats: {
+      totalRounds: session.roundNumber,
+      gameDuration: Date.now() - session.createdAt,
+    },
+  });
+}
+
 
 // ============================================================================
 // Exports

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useRef, useCallback, useImperativeHandle, forwardRef, useState } from 'react';
 import { Game, GameMode, GameSettings } from '@/engine/core/Game';
 import { useResponsiveCanvas } from '@/hooks/useResponsiveCanvas';
 import { GameStats } from '@/types/game';
+import { NetworkManager, getNetworkManager, NetworkStatus } from '@/engine/multiplayer/NetworkManager';
 
 interface GameCanvasProps {
   mode: GameMode;
@@ -24,6 +25,11 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(
     const gameRef = useRef<Game | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const gameOverCallbackRef = useRef(onGameOver);
+    const networkManagerRef = useRef<NetworkManager | null>(null);
+
+    // Network state
+    const [networkStatus, setNetworkStatus] = useState<NetworkStatus>('disconnected');
+    const [assignedTankId, setAssignedTankId] = useState<number | null>(null);
 
     // Keep callback ref updated
     useEffect(() => {
@@ -78,18 +84,116 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(
       reset,
     }), [getStats, pause, resume, reset]);
 
+    // Initialize network for online mode
+    useEffect(() => {
+      if (mode !== 'online') return;
+
+      const initNetwork = async () => {
+        try {
+          // Get or create NetworkManager instance
+          const networkManager = getNetworkManager();
+          networkManagerRef.current = networkManager;
+
+          // Set up network callbacks
+          networkManager.setCallbacks({
+            onStatusChange: (status) => {
+              console.log('[GameCanvas] Network status:', status);
+              setNetworkStatus(status);
+            },
+            onMatchFound: (opponent, tankId) => {
+              console.log('[GameCanvas] Match found! Assigned tank:', tankId);
+              setAssignedTankId(tankId);
+            },
+            onGameState: (state) => {
+              // Game state updates will be handled by Game class
+              // This is where server-authoritative state would be applied
+            },
+            onPlayerJoined: (player) => {
+              console.log('[GameCanvas] Player joined:', player.name);
+            },
+            onPlayerLeft: (playerId, reason) => {
+              console.log('[GameCanvas] Player left:', playerId, reason);
+            },
+            onGameOver: (winner, scores) => {
+              console.log('[GameCanvas] Network game over:', winner, scores);
+              if (gameOverCallbackRef.current) {
+                gameOverCallbackRef.current(winner);
+              }
+            },
+            onCountdown: (countdown) => {
+              console.log('[GameCanvas] Countdown:', countdown);
+            },
+            onRoundStart: (roundNumber) => {
+              console.log('[GameCanvas] Round started:', roundNumber);
+            },
+            onRoundOver: (roundNumber, winner, scores) => {
+              console.log('[GameCanvas] Round over:', roundNumber, winner, scores);
+            },
+            onError: (code, message) => {
+              console.error('[GameCanvas] Network error:', code, message);
+            },
+            onLatencyUpdate: (latency) => {
+              // Could display latency to user
+            },
+          });
+
+          // Connect to server
+          await networkManager.connect();
+          console.log('[GameCanvas] Connected to game server');
+
+          // Start matchmaking
+          await networkManager.findMatch();
+          console.log('[GameCanvas] Finding match...');
+
+        } catch (error) {
+          console.error('[GameCanvas] Failed to initialize network:', error);
+        }
+      };
+
+      initNetwork();
+
+      // Cleanup network on unmount
+      return () => {
+        if (networkManagerRef.current) {
+          networkManagerRef.current.disconnect();
+          networkManagerRef.current = null;
+        }
+      };
+    }, [mode]);
+
     // Initialize game
     useEffect(() => {
       if (!canvasRef.current) return;
 
+      // For online mode, wait until we have an assigned tank ID
+      if (mode === 'online' && assignedTankId === null) {
+        console.log('[GameCanvas] Waiting for tank assignment...');
+        return;
+      }
+
+      // Prepare settings with network-specific configuration
+      const gameSettings: Partial<GameSettings> = {
+        ...settings,
+      };
+
+      // For online mode, set the local player controls based on assigned tank ID
+      if (mode === 'online' && assignedTankId !== null) {
+        gameSettings.localPlayerControls = assignedTankId === 1 ? 'wasd' : 'arrows';
+        console.log('[GameCanvas] Local player controls:', gameSettings.localPlayerControls);
+      }
+
       // Create game instance
-      const game = new Game(canvasRef.current, mode, settings);
+      // Note: NetworkManager instance will be passed once Game class is updated (Task #1)
+      const game = new Game(canvasRef.current, mode, gameSettings);
       gameRef.current = game;
+
+      // TODO: Once Task #1 is complete, pass NetworkManager to Game:
+      // const game = new Game(canvasRef.current, mode, gameSettings, networkManagerRef.current);
 
       // Start the game
       game.start();
 
-      // Poll for game over state
+      // Poll for game over state (for local/AI modes)
       const checkGameOver = setInterval(() => {
         if (game.state === 'gameover') {
           const scores = game.getScores();
@@ -109,7 +213,7 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(
         game.destroy();
         gameRef.current = null;
       };
-    }, [mode, settings]);
+    }, [mode, settings, assignedTankId]);
 
     return (
       <div

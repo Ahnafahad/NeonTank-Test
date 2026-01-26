@@ -274,32 +274,30 @@ export class Game {
   }
 
   private applyServerState(state: GameStateSnapshot): void {
-    // Buffer the server state for interpolation
-    this.serverStateBuffer.push({
-      state: state,
-      receivedTime: Date.now(),
-    });
+    // Apply tank states
+    for (const tankData of state.tanks) {
+      const tank = tankData.id === 1 ? this.p1 : this.p2;
+      if (!tank) continue;
 
-    // Keep buffer size manageable
-    if (this.serverStateBuffer.length > this.MAX_BUFFER_SIZE) {
-      this.serverStateBuffer.shift();
+      // Update tank position and state
+      tank.pos.x = tankData.x;
+      tank.pos.y = tankData.y;
+      tank.angle = tankData.angle;
+      tank.health = tankData.health;
+      tank.ammo = tankData.ammo;
+      tank.isReloading = tankData.isReloading;
+      // Calculate reloadTimer from reloadProgress (0-1) if needed
+      if (tankData.isReloading && tankData.reloadProgress !== undefined) {
+        tank.reloadTimer = tank.reloadDuration * (1 - tankData.reloadProgress);
+      }
+      tank.chargeLevel = tankData.chargeLevel;
+      tank.isCharging = tankData.isCharging;
+      tank.currentWeapon = tankData.currentWeapon;
+      tank.speedTimer = tankData.speedTimer;
+      tank.shieldTimer = tankData.shieldTimer;
+      tank.weaponTimer = tankData.weaponTimer;
+      tank.dead = tankData.dead;
     }
-
-    this.lastServerState = state;
-
-    // Apply non-player game state first (bullets, powerups, walls, etc.)
-    this.applyNonPlayerGameState(state);
-
-    // Reconcile local player prediction with server state
-    if (this.mode === 'online' && this.assignedTankId) {
-      this.reconcileWithServer(state);
-    }
-
-    // Update remote player with interpolation
-    this.updateRemotePlayerInterpolation(state);
-  }
-
-  private applyNonPlayerGameState(state: GameStateSnapshot): void {
 
     // Apply bullet states
     this.bullets = state.bullets.map((bulletData) => {
@@ -352,236 +350,15 @@ export class Game {
     this.gameStartTime = Date.now() - state.gameTime;
   }
 
-  private reconcileWithServer(serverState: GameStateSnapshot): void {
-    if (!this.assignedTankId || !this.networkManager) return;
-
-    const localTank = this.assignedTankId === 1 ? this.p1 : this.p2;
-    const serverTank = serverState.tanks.find((t) => t.id === this.assignedTankId);
-
-    if (!serverTank) return;
-
-    // Get the last processed input sequence from server
-    const playerId = this.networkManager.getPlayerId();
-    const lastProcessedSeq = serverState.lastProcessedInput[playerId] || 0;
-
-    // Remove processed predictions from history
-    this.predictionHistory = this.predictionHistory.filter(
-      (p) => p.sequenceNumber > lastProcessedSeq
-    );
-
-    // Check for prediction error (mismatch between client and server)
-    const positionError = Math.sqrt(
-      Math.pow(localTank.pos.x - serverTank.x, 2) + Math.pow(localTank.pos.y - serverTank.y, 2)
-    );
-
-    // If error exceeds threshold, reconcile by resetting to server state
-    if (positionError > this.reconciliationThreshold) {
-      console.log(`[Prediction] Reconciling: error=${positionError.toFixed(2)}px`);
-
-      // Reset to server state
-      localTank.pos.x = serverTank.x;
-      localTank.pos.y = serverTank.y;
-      localTank.angle = serverTank.angle;
-      localTank.health = serverTank.health;
-      localTank.ammo = serverTank.ammo;
-      localTank.chargeLevel = serverTank.chargeLevel;
-      localTank.isCharging = serverTank.isCharging;
-      localTank.currentWeapon = serverTank.currentWeapon;
-      localTank.speedTimer = serverTank.speedTimer;
-      localTank.shieldTimer = serverTank.shieldTimer;
-      localTank.weaponTimer = serverTank.weaponTimer;
-      localTank.isReloading = serverTank.isReloading;
-      if (serverTank.isReloading && serverTank.reloadProgress !== undefined) {
-        localTank.reloadTimer = localTank.reloadDuration * (1 - serverTank.reloadProgress);
-      }
-      localTank.dead = serverTank.dead;
-
-      // Replay unprocessed inputs on top of server state
-      this.replayPredictions();
-    } else {
-      // Small error - just update non-predicted properties
-      localTank.health = serverTank.health;
-      localTank.ammo = serverTank.ammo;
-      localTank.currentWeapon = serverTank.currentWeapon;
-      localTank.speedTimer = serverTank.speedTimer;
-      localTank.shieldTimer = serverTank.shieldTimer;
-      localTank.weaponTimer = serverTank.weaponTimer;
-      localTank.isReloading = serverTank.isReloading;
-      if (serverTank.isReloading && serverTank.reloadProgress !== undefined) {
-        localTank.reloadTimer = localTank.reloadDuration * (1 - serverTank.reloadProgress);
-      }
-      localTank.dead = serverTank.dead;
-    }
-  }
-
-  private replayPredictions(): void {
-    if (!this.assignedTankId || !this.networkManager) return;
-
-    const localTank = this.assignedTankId === 1 ? this.p1 : this.p2;
-    const remoteTank = this.assignedTankId === 1 ? this.p2 : this.p1;
-    const pendingInputs = this.networkManager.getPendingInputs();
-
-    // Replay each pending input to bring local state up to date
-    for (const input of pendingInputs) {
-      const keys = this.convertInputToKeys(input);
-
-      // Simulate one update step with this input
-      localTank.update(
-        keys,
-        this.walls,
-        this.crates,
-        this.hazards,
-        remoteTank,
-        this.suddenDeathActive,
-        this.suddenDeathInset,
-        this.settings,
-        1.0
-      );
-    }
-  }
-
-  private convertInputToKeys(input: any): Record<string, boolean> {
-    if (!this.assignedTankId) return {};
-
-    const localTank = this.assignedTankId === 1 ? this.p1 : this.p2;
-    const keys: Record<string, boolean> = {};
-
-    // Convert movement vector to key presses
-    if (input.movement.y < 0) keys[localTank.controls.up] = true;
-    if (input.movement.y > 0) keys[localTank.controls.down] = true;
-    if (input.movement.x < 0) keys[localTank.controls.left] = true;
-    if (input.movement.x > 0) keys[localTank.controls.right] = true;
-    if (input.shoot) keys[localTank.controls.shoot] = true;
-
-    return keys;
-  }
-
-  private savePredictedState(sequenceNumber: number): void {
-    if (!this.assignedTankId) return;
-
-    const localTank = this.assignedTankId === 1 ? this.p1 : this.p2;
-
-    const state: PredictedState = {
-      timestamp: Date.now(),
-      sequenceNumber,
-      position: { x: localTank.pos.x, y: localTank.pos.y },
-      angle: localTank.angle,
-      velocity: { x: 0, y: 0 },
-      health: localTank.health,
-      ammo: localTank.ammo,
-      chargeLevel: localTank.chargeLevel,
-    };
-
-    this.predictionHistory.push(state);
-
-    // Limit history size
-    if (this.predictionHistory.length > this.MAX_PREDICTION_HISTORY) {
-      this.predictionHistory.shift();
-    }
-  }
-
-  private updateRemotePlayerInterpolation(serverState: GameStateSnapshot): void {
-    if (!this.assignedTankId) return;
-
-    const remoteTankId = this.assignedTankId === 1 ? 2 : 1;
-    const serverRemoteTank = serverState.tanks.find((t) => t.id === remoteTankId);
-
-    if (!serverRemoteTank) return;
-
-    // Use interpolation buffer to smooth out remote player movement
-    const renderTime = Date.now() - this.INTERPOLATION_DELAY;
-
-    // Find two states to interpolate between
-    let fromState: BufferedServerState | null = null;
-    let toState: BufferedServerState | null = null;
-
-    for (let i = 0; i < this.serverStateBuffer.length - 1; i++) {
-      const current = this.serverStateBuffer[i];
-      const next = this.serverStateBuffer[i + 1];
-
-      if (current.receivedTime <= renderTime && next.receivedTime >= renderTime) {
-        fromState = current;
-        toState = next;
-        break;
-      }
-    }
-
-    // If we have states to interpolate between, use them
-    if (fromState && toState) {
-      const fromTank = fromState.state.tanks.find((t) => t.id === remoteTankId);
-      const toTank = toState.state.tanks.find((t) => t.id === remoteTankId);
-
-      if (fromTank && toTank) {
-        const totalDuration = toState.receivedTime - fromState.receivedTime;
-        const elapsed = renderTime - fromState.receivedTime;
-        const t = Math.min(1, Math.max(0, elapsed / totalDuration));
-
-        // Interpolate position and angle
-        const remoteTank = remoteTankId === 1 ? this.p1 : this.p2;
-        remoteTank.pos.x = this.lerp(fromTank.x, toTank.x, t);
-        remoteTank.pos.y = this.lerp(fromTank.y, toTank.y, t);
-        remoteTank.angle = this.lerpAngle(fromTank.angle, toTank.angle, t);
-        remoteTank.health = toTank.health;
-        remoteTank.ammo = toTank.ammo;
-        remoteTank.chargeLevel = toTank.chargeLevel;
-        remoteTank.isCharging = toTank.isCharging;
-        remoteTank.currentWeapon = toTank.currentWeapon;
-        remoteTank.speedTimer = toTank.speedTimer;
-        remoteTank.shieldTimer = toTank.shieldTimer;
-        remoteTank.weaponTimer = toTank.weaponTimer;
-        remoteTank.isReloading = toTank.isReloading;
-        if (toTank.isReloading && toTank.reloadProgress !== undefined) {
-          remoteTank.reloadTimer = remoteTank.reloadDuration * (1 - toTank.reloadProgress);
-        }
-        remoteTank.dead = toTank.dead;
-
-        return;
-      }
-    }
-
-    // Fallback: use latest server state directly
-    const remoteTank = remoteTankId === 1 ? this.p1 : this.p2;
-    remoteTank.pos.x = serverRemoteTank.x;
-    remoteTank.pos.y = serverRemoteTank.y;
-    remoteTank.angle = serverRemoteTank.angle;
-    remoteTank.health = serverRemoteTank.health;
-    remoteTank.ammo = serverRemoteTank.ammo;
-    remoteTank.chargeLevel = serverRemoteTank.chargeLevel;
-    remoteTank.isCharging = serverRemoteTank.isCharging;
-    remoteTank.currentWeapon = serverRemoteTank.currentWeapon;
-    remoteTank.speedTimer = serverRemoteTank.speedTimer;
-    remoteTank.shieldTimer = serverRemoteTank.shieldTimer;
-    remoteTank.weaponTimer = serverRemoteTank.weaponTimer;
-    remoteTank.isReloading = serverRemoteTank.isReloading;
-    if (serverRemoteTank.isReloading && serverRemoteTank.reloadProgress !== undefined) {
-      remoteTank.reloadTimer = remoteTank.reloadDuration * (1 - serverRemoteTank.reloadProgress);
-    }
-    remoteTank.dead = serverRemoteTank.dead;
-  }
-
-  // Linear interpolation helper
-  private lerp(a: number, b: number, t: number): number {
-    return a + (b - a) * t;
-  }
-
-  // Angle interpolation (handles wraparound)
-  private lerpAngle(a: number, b: number, t: number): number {
-    let diff = b - a;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    return a + diff * t;
-  }
-
   private update(deltaMultiplier: number = 1.0): void {
     if (this.state !== 'playing') return;
 
     const keys = this.inputManager.getKeyboardState();
 
-    // Handle online mode with client-side prediction
+    // Handle online mode differently - send inputs to server
     if (this.mode === 'online' && this.networkManager && this.assignedTankId) {
       // Calculate movement vector from keyboard state
       const localTank = this.assignedTankId === 1 ? this.p1 : this.p2;
-      const remoteTank = this.assignedTankId === 1 ? this.p2 : this.p1;
       const controls = localTank.controls;
 
       const movement = {
@@ -595,54 +372,8 @@ export class Game {
       // Send input to server
       this.networkManager.sendInput(movement, shoot, chargeLevel);
 
-      // CLIENT-SIDE PREDICTION: Apply local input immediately for instant feedback
-      const localKeys: Record<string, boolean> = {};
-      if (movement.y < 0) localKeys[controls.up] = true;
-      if (movement.y > 0) localKeys[controls.down] = true;
-      if (movement.x < 0) localKeys[controls.left] = true;
-      if (movement.x > 0) localKeys[controls.right] = true;
-      if (shoot) localKeys[controls.shoot] = true;
-
-      // Update local player immediately (prediction)
-      const newBullets = localTank.update(
-        localKeys,
-        this.walls,
-        this.crates,
-        this.hazards,
-        remoteTank,
-        this.suddenDeathActive,
-        this.suddenDeathInset,
-        this.settings,
-        deltaMultiplier
-      );
-      this.bullets.push(...newBullets);
-
-      // Save predicted state for later reconciliation
-      const pendingInputs = this.networkManager.getPendingInputs();
-      if (pendingInputs.length > 0) {
-        const lastInput = pendingInputs[pendingInputs.length - 1];
-        this.savePredictedState(lastInput.sequenceNumber);
-      }
-
-      // Update particles and bullets locally for smooth visuals
-      for (let i = this.bullets.length - 1; i >= 0; i--) {
-        const b = this.bullets[i];
-        b.update(this.walls, this.crates);
-
-        if (!b.active) {
-          this.createExplosion(b.pos.x, b.pos.y, b.color, 5);
-          this.bullets.splice(i, 1);
-        }
-      }
-
-      for (let i = this.particles.length - 1; i >= 0; i--) {
-        this.particles[i].update();
-        if (this.particles[i].isDead()) {
-          this.particles.splice(i, 1);
-        }
-      }
-
-      // Server will update remote player and game state via callbacks
+      // Server state updates will be applied via applyServerState callback
+      // No local entity updates in online mode - server is authoritative
       return;
     }
 
