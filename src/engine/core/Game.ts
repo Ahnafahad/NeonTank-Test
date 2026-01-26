@@ -434,8 +434,8 @@ export class Game {
     this.suddenDeathActive = state.suddenDeath;
     this.suddenDeathInset = state.suddenDeathInset;
 
-    // Update game start time to match server game time
-    this.gameStartTime = Date.now() - state.gameTime;
+    // Update game start time to match server game time (server sends in seconds, convert to ms)
+    this.gameStartTime = Date.now() - (state.gameTime * 1000);
   }
 
   private reconcileWithServer(serverState: GameStateSnapshot): void {
@@ -489,7 +489,7 @@ export class Game {
       // Small error - smooth correction without replay
       console.log(`[Reconciliation] SMOOTH: error=${positionError.toFixed(2)}px`);
 
-      const alpha = 0.3; // 30% correction per update
+      const alpha = 0.6; // 60% correction per update (faster convergence)
       localTank.pos.x += (serverTank.x - localTank.pos.x) * alpha;
       localTank.pos.y += (serverTank.y - localTank.pos.y) * alpha;
 
@@ -635,7 +635,8 @@ export class Game {
         const remoteTank = remoteTankId === 1 ? this.p1 : this.p2;
         remoteTank.pos.x = this.lerp(fromTank.x, toTank.x, t);
         remoteTank.pos.y = this.lerp(fromTank.y, toTank.y, t);
-        remoteTank.angle = this.lerpAngle(fromTank.angle, toTank.angle, t);
+        // Don't interpolate angle - snap it to prevent visual desync with bullets
+        remoteTank.angle = toTank.angle;
         remoteTank.health = toTank.health;
         remoteTank.ammo = toTank.ammo;
         remoteTank.chargeLevel = toTank.chargeLevel;
