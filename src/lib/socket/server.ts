@@ -582,7 +582,7 @@ function serializeTank(tank: Tank): SerializedTank {
 
 function serializeBullet(bullet: Bullet): SerializedBullet {
   return {
-    id: `${bullet.ownerId}-${Date.now()}-${Math.random()}`,
+    id: bullet.id,
     x: bullet.pos.x,
     y: bullet.pos.y,
     velX: bullet.vel.x,

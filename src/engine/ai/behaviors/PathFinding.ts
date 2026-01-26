@@ -66,6 +66,28 @@ export class PathFinding {
     }
   }
 
+  updateGridWithHazards(walls: Wall[], crates: Wall[], hazards: any[]): void {
+    this.updateGrid(walls, crates);
+
+    // Mark hazards as unwalkable
+    for (const hazard of hazards) {
+      const startX = Math.floor(hazard.x / this.gridSize);
+      const startY = Math.floor(hazard.y / this.gridSize);
+      const endX = Math.ceil((hazard.x + hazard.w) / this.gridSize); // Hazard uses w/h like Wall?
+      // Hazard definition in entities/Hazard.ts needed.
+      // Assuming x, y, w, h
+      const endY = Math.ceil((hazard.y + hazard.h) / this.gridSize);
+
+      for (let y = startY; y < endY; y++) {
+        for (let x = startX; x < endX; x++) {
+          if (y >= 0 && y < this.gridHeight && x >= 0 && x < this.gridWidth) {
+            this.grid[y][x] = false;
+          }
+        }
+      }
+    }
+  }
+
   worldToGrid(pos: Vector): { x: number; y: number } {
     return {
       x: Math.floor(pos.x / this.gridSize),
@@ -140,7 +162,7 @@ export class PathFinding {
 
         if (dir.dx !== 0 && dir.dy !== 0) {
           if (!this.isWalkable(current.x + dir.dx, current.y) ||
-              !this.isWalkable(current.x, current.y + dir.dy)) continue;
+            !this.isWalkable(current.x, current.y + dir.dy)) continue;
         }
 
         const moveCost = dir.dx !== 0 && dir.dy !== 0 ? 1.414 : 1;

@@ -11,6 +11,7 @@ export class Bullet {
   public radius: number;
   public color: string;
   public ownerId: number;
+  public id: string;
   public active: boolean;
   public type: BulletType;
   public damage: number;
@@ -33,6 +34,7 @@ export class Bullet {
     this.radius = type === 'CHARGE' ? Constants.CHARGE_BULLET_RADIUS : Constants.BULLET_RADIUS;
     this.color = ownerColor;
     this.ownerId = ownerId;
+    this.id = `${ownerId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.active = true;
     this.type = type;
 

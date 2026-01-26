@@ -9,6 +9,7 @@ import { Constants } from '@/engine/utils/Constants';
 import { Vector } from '@/engine/utils/Vector';
 import { MobileControls } from '@/components/mobile';
 import { MatchmakingScreen } from '@/components/menus/MatchmakingScreen';
+import { getNetworkManager } from '@/engine/multiplayer/NetworkManager';
 import type { AIDifficulty } from '@/engine/ai';
 
 export default function HomePage() {
@@ -84,10 +85,15 @@ function GameContent() {
       let settings = undefined;
       if (mode === 'ai') {
         settings = { aiDifficulty };
+        gameRef.current = new Game(canvasRef.current, mode, settings);
       } else if (mode === 'online') {
         settings = { localPlayerControls: onlineControlScheme };
+        const networkManager = getNetworkManager();
+        gameRef.current = new Game(canvasRef.current, mode, settings, networkManager);
+      } else {
+        gameRef.current = new Game(canvasRef.current, mode, settings);
       }
-      gameRef.current = new Game(canvasRef.current, mode, settings);
+
       gameRef.current.start();
       animationRef.current = requestAnimationFrame(pollGameStats);
     }
@@ -105,7 +111,12 @@ function GameContent() {
       gameRef.current.destroy();
       gameRef.current = null;
     }
-  }, [currentScreen]);
+
+    // If we left online mode completely (back to menu), disconnect
+    if (currentScreen === 'menu' && mode === 'online') {
+      getNetworkManager().disconnect();
+    }
+  }, [currentScreen, mode]);
 
   const handleRematch = () => {
     if (gameRef.current) {

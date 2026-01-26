@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useRef } from 'react';
 import { useMultiplayerStore } from '@/store/useMultiplayerStore';
-import { NetworkManager, NetworkStatus } from '@/engine/multiplayer/NetworkManager';
+import { NetworkManager, NetworkStatus, getNetworkManager } from '@/engine/multiplayer/NetworkManager';
 
 export function useMultiplayer() {
     const networkManagerRef = useRef<NetworkManager | null>(null);
@@ -38,7 +38,7 @@ export function useMultiplayer() {
     // Initialize NetworkManager
     useEffect(() => {
         if (!networkManagerRef.current) {
-            networkManagerRef.current = new NetworkManager();
+            networkManagerRef.current = getNetworkManager();
 
             // Set up callbacks
             networkManagerRef.current.setCallbacks({
@@ -92,11 +92,13 @@ export function useMultiplayer() {
         }
 
         return () => {
-            // Cleanup on unmount
-            networkManagerRef.current?.disconnect();
+            // Cleanup on unmount - just remove callbacks, don't disconnect!
+            if (networkManagerRef.current) {
+                networkManagerRef.current.clearCallbacks();
+            }
             networkManagerRef.current = null;
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Connect to server

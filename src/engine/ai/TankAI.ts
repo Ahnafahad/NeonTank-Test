@@ -5,6 +5,7 @@ import { Bullet } from '../entities/Bullet';
 import { Wall } from '../entities/Wall';
 import { PowerUp } from '../entities/PowerUp';
 import { Constants } from '../utils/Constants';
+import { Hazard } from '../entities/Hazard';
 import { PathFinding } from './behaviors/PathFinding';
 import { AimingSystem, AIDifficulty } from './behaviors/AimingSystem';
 
@@ -26,6 +27,8 @@ export class TankAI {
   private stateTimer: number = 0;
   private currentPath: Vector[] = [];
   private pathIndex: number = 0;
+  private lastPathUpdateTime: number = 0;
+  private pathUpdateInterval: number = 500; // Recalculate every 500ms
   private targetPowerUp: PowerUp | null = null;
 
   // Reaction timing
@@ -71,11 +74,12 @@ export class TankAI {
     walls: Wall[],
     crates: Wall[],
     powerups: PowerUp[],
+    hazards: Hazard[],
     suddenDeathActive: boolean,
     suddenDeathInset: number
   ): AIInput {
     // Update pathfinding grid
-    this.pathFinding.updateGrid(walls, crates);
+    this.pathFinding.updateGridWithHazards(walls, crates, hazards);
 
     // Reaction delay
     if (this.reactionTimer > 0) {
@@ -91,6 +95,7 @@ export class TankAI {
       walls,
       crates,
       powerups,
+      hazards,
       suddenDeathActive,
       suddenDeathInset
     );
@@ -105,6 +110,7 @@ export class TankAI {
     walls: Wall[],
     crates: Wall[],
     powerups: PowerUp[],
+    hazards: Hazard[],
     suddenDeathActive: boolean,
     suddenDeathInset: number
   ): AIInput {
@@ -125,11 +131,11 @@ export class TankAI {
     // Priority 3: Collect nearby power-ups (if beneficial)
     const nearbyPowerUp = this.findBestPowerUp(aiTank, powerups, playerTank);
     if (nearbyPowerUp && this.shouldCollectPowerUp(aiTank, nearbyPowerUp, playerTank)) {
-      return this.collectPowerUp(aiTank, nearbyPowerUp, playerTank, walls, crates);
+      return this.collectPowerUp(aiTank, nearbyPowerUp, playerTank, walls, crates, hazards);
     }
 
     // Priority 4: Combat behavior
-    return this.combatBehavior(aiTank, playerTank, walls, crates);
+    return this.combatBehavior(aiTank, playerTank, walls, crates, hazards);
   }
 
   private findDangerousBullet(aiTank: Tank, bullets: Bullet[]): Bullet | null {
@@ -172,9 +178,9 @@ export class TankAI {
 
     // Also check bounds
     const inBounds1 = pos1.x > 30 && pos1.x < Constants.GAME_WIDTH - 30 &&
-                      pos1.y > 30 && pos1.y < Constants.GAME_HEIGHT - 30;
+      pos1.y > 30 && pos1.y < Constants.GAME_HEIGHT - 30;
     const inBounds2 = pos2.x > 30 && pos2.x < Constants.GAME_WIDTH - 30 &&
-                      pos2.y > 30 && pos2.y < Constants.GAME_HEIGHT - 30;
+      pos2.y > 30 && pos2.y < Constants.GAME_HEIGHT - 30;
 
     let evadeDir: Vector;
     if (inBounds1 && (!inBounds2 || dist1 > dist2)) {
@@ -293,15 +299,26 @@ export class TankAI {
     powerup: PowerUp,
     playerTank: Tank,
     walls: Wall[],
-    crates: Wall[]
+    crates: Wall[],
+    hazards: Hazard[]
   ): AIInput {
-    const direction = powerup.pos.sub(aiTank.pos).normalize();
+    // Check if we can move directly
+    if (this.canMoveDirectly(aiTank.pos, powerup.pos, walls, crates, hazards)) {
+      const direction = powerup.pos.sub(aiTank.pos).normalize();
+      const aimResult = this.aimingSystem.calculateAim(aiTank, playerTank, walls, crates);
+      return {
+        movement: direction,
+        shoot: aimResult.shouldShoot && aimResult.confidence > 0.5,
+        chargeLevel: 0,
+      };
+    }
 
-    // Still try to shoot while moving
+    // Otherwise use pathfinding
+    const pathDir = this.followPath(aiTank.pos, powerup.pos, walls, crates, hazards);
     const aimResult = this.aimingSystem.calculateAim(aiTank, playerTank, walls, crates);
 
     return {
-      movement: direction,
+      movement: pathDir,
       shoot: aimResult.shouldShoot && aimResult.confidence > 0.5,
       chargeLevel: 0,
     };
@@ -311,7 +328,8 @@ export class TankAI {
     aiTank: Tank,
     playerTank: Tank,
     walls: Wall[],
-    crates: Wall[]
+    crates: Wall[],
+    hazards: Hazard[]
   ): AIInput {
     const distance = aiTank.pos.distanceTo(playerTank.pos);
     const aimResult = this.aimingSystem.calculateAim(aiTank, playerTank, walls, crates);
@@ -325,10 +343,21 @@ export class TankAI {
     // Positioning
     if (distance < optimalMin) {
       // Too close - back away
-      movement = aiTank.pos.sub(playerTank.pos).normalize();
+      if (this.canMoveDirectly(aiTank.pos, playerTank.pos, walls, crates, hazards)) {
+        movement = aiTank.pos.sub(playerTank.pos).normalize();
+      } else {
+        // If stuck, try pathfinding away? Or just strafe?
+        // Simple backup:
+        movement = aiTank.pos.sub(playerTank.pos).normalize();
+      }
     } else if (distance > optimalMax) {
       // Too far - move closer
-      movement = playerTank.pos.sub(aiTank.pos).normalize();
+      if (this.canMoveDirectly(aiTank.pos, playerTank.pos, walls, crates, hazards)) {
+        movement = playerTank.pos.sub(aiTank.pos).normalize();
+      } else {
+        // Use pathfinding
+        movement = this.followPath(aiTank.pos, playerTank.pos, walls, crates, hazards);
+      }
     } else {
       // In optimal range - strafe
       if (this.difficulty !== 'easy') {
@@ -336,7 +365,15 @@ export class TankAI {
           -(playerTank.pos.y - aiTank.pos.y),
           playerTank.pos.x - aiTank.pos.x
         ).normalize();
-        movement = perpendicular.mult(Math.sin(Date.now() / 500));
+
+        // Check if strafe is blocked
+        const strafePos = aiTank.pos.add(perpendicular.mult(40));
+        if (this.canMoveDirectly(aiTank.pos, strafePos, walls, crates, hazards)) {
+          movement = perpendicular.mult(Math.sin(Date.now() / 500));
+        } else {
+          // Wall behind/beside, move towards center or player
+          movement = playerTank.pos.sub(aiTank.pos).normalize();
+        }
       }
     }
 
@@ -377,5 +414,74 @@ export class TankAI {
     if (input.shoot) keys[controls.shoot] = true;
 
     return keys;
+  }
+
+  private canMoveDirectly(from: Vector, to: Vector, walls: Wall[], crates: Wall[], hazards: Hazard[]): boolean {
+    const allObstacles: any[] = [...walls, ...crates.filter(c => c.active), ...hazards];
+    const direction = to.sub(from).normalize();
+    const distance = from.distanceTo(to);
+    const steps = Math.ceil(distance / 20); // Check every 20 pixels
+    const tankRadius = 18; // Tank radius
+
+    for (let i = 1; i < steps; i++) {
+      const checkPos = from.add(direction.mult(i * 20));
+      for (const obstacle of allObstacles) {
+        // Check implicit w/h or explicit
+        const ow = obstacle.w;
+        const oh = obstacle.h;
+
+        if (
+          checkPos.x + tankRadius > obstacle.x &&
+          checkPos.x - tankRadius < obstacle.x + ow &&
+          checkPos.y + tankRadius > obstacle.y &&
+          checkPos.y - tankRadius < obstacle.y + oh
+        ) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  private followPath(start: Vector, end: Vector, walls: Wall[], crates: Wall[], hazards: Hazard[]): Vector {
+    const now = Date.now();
+
+    // Update path if needed
+    if (this.currentPath.length === 0 ||
+      this.pathIndex >= this.currentPath.length ||
+      now - this.lastPathUpdateTime > this.pathUpdateInterval) {
+
+      this.currentPath = this.pathFinding.findPath(start, end);
+      this.pathIndex = 0;
+      this.lastPathUpdateTime = now;
+    }
+
+    if (this.currentPath.length === 0) {
+      // Fallback if no path found
+      return end.sub(start).normalize();
+    }
+
+    // Path Smoothing: Check if we can skip the current node and go directly to the next one
+    // Only check if we have a next node
+    if (this.pathIndex + 1 < this.currentPath.length) {
+      const nextNode = this.currentPath[this.pathIndex + 1];
+      if (this.canMoveDirectly(start, nextNode, walls, crates, hazards)) {
+        this.pathIndex++;
+      }
+    }
+
+    // Get target node
+    let targetNode = this.currentPath[this.pathIndex];
+
+    // Check if we reached the node
+    if (start.distanceTo(targetNode) < 20) {
+      this.pathIndex++;
+      if (this.pathIndex >= this.currentPath.length) {
+        return Vector.zero();
+      }
+      targetNode = this.currentPath[this.pathIndex];
+    }
+
+    return targetNode.sub(start).normalize();
   }
 }

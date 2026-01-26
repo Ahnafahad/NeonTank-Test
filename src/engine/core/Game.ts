@@ -100,6 +100,7 @@ export class Game {
   private lastPowerUpTime: number = 0;
   private suddenDeathActive: boolean = false;
   private suddenDeathInset: number = 0;
+  private roundWinner: number | null = null;
 
   // Animation frame
   private animationFrameId: number | null = null;
@@ -270,6 +271,13 @@ export class Game {
       onGameState: (state: GameStateSnapshot) => {
         this.applyServerState(state);
       },
+      onRoundOver: (round, winner, scores) => {
+        this.roundWinner = winner;
+        this.scores = scores;
+      },
+      onRoundStart: (roundNumber) => {
+        this.roundWinner = null;
+      },
     });
   }
 
@@ -301,22 +309,48 @@ export class Game {
 
   private applyNonPlayerGameState(state: GameStateSnapshot): void {
 
-    // Apply bullet states
+    // VFX: Detect removed bullets from server state to trigger explosions
+    if (this.lastServerState) {
+      const currentBulletIds = new Set(state.bullets.map(b => b.id));
+      for (const prevBullet of this.lastServerState.bullets) {
+        if (!currentBulletIds.has(prevBullet.id)) {
+          this.createExplosion(prevBullet.x, prevBullet.y, prevBullet.color, 5);
+        }
+      }
+    }
+
+    // Apply bullet states - reuse existing instances to preserve trails
+    const existingBullets = new Map<string, Bullet>();
+    this.bullets.forEach(b => existingBullets.set(b.id, b));
+
     this.bullets = state.bullets.map((bulletData) => {
-      // Calculate angle from velocity for bullet constructor
-      const angle = Math.atan2(bulletData.velY, bulletData.velX);
-      const bullet = new Bullet(
-        bulletData.x,
-        bulletData.y,
-        angle,
-        bulletData.color,
-        bulletData.ownerId,
-        bulletData.type
-      );
-      // Override velocity with server velocity (more accurate than recalculating from angle)
-      bullet.vel.x = bulletData.velX;
-      bullet.vel.y = bulletData.velY;
-      bullet.bounces = bulletData.bounces;
+      let bullet = existingBullets.get(bulletData.id);
+
+      if (bullet) {
+        // Update existing bullet
+        bullet.pos.x = bulletData.x;
+        bullet.pos.y = bulletData.y;
+        bullet.vel.x = bulletData.velX;
+        bullet.vel.y = bulletData.velY;
+        bullet.bounces = bulletData.bounces;
+        bullet.active = true; // Ensure active
+      } else {
+        // Create new bullet
+        const angle = Math.atan2(bulletData.velY, bulletData.velX);
+        bullet = new Bullet(
+          bulletData.x,
+          bulletData.y,
+          angle,
+          bulletData.color,
+          bulletData.ownerId,
+          bulletData.type
+        );
+        // Important: Sync ID and Velocity exactly
+        bullet.id = bulletData.id;
+        bullet.vel.x = bulletData.velX;
+        bullet.vel.y = bulletData.velY;
+        bullet.bounces = bulletData.bounces;
+      }
       return bullet;
     });
 
@@ -686,6 +720,7 @@ export class Game {
         this.walls,
         this.crates,
         this.powerups,
+        this.hazards,
         this.suddenDeathActive,
         this.suddenDeathInset
       );
@@ -867,6 +902,32 @@ export class Game {
         Constants.GAME_WIDTH - this.suddenDeathInset * 2,
         Constants.GAME_HEIGHT - this.suddenDeathInset * 2
       );
+    }
+
+    // Draw Round Winner Overlay
+    if (this.roundWinner !== null) {
+      this.ctx.save();
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      this.ctx.fillRect(0, 0, Constants.GAME_WIDTH, Constants.GAME_HEIGHT);
+
+      this.ctx.font = 'bold 48px Orbitron, sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+
+      const text = this.roundWinner === 1 ? 'RED WINS ROUND' : 'BLUE WINS ROUND';
+      const color = this.roundWinner === 1 ? Constants.PLAYER1_COLOR : Constants.PLAYER2_COLOR;
+
+      this.ctx.fillStyle = color;
+      this.ctx.shadowBlur = 20;
+      this.ctx.shadowColor = color;
+      this.ctx.fillText(text, Constants.GAME_WIDTH / 2, Constants.GAME_HEIGHT / 2);
+
+      this.ctx.font = '24px Orbitron, sans-serif';
+      this.ctx.fillStyle = '#fff';
+      this.ctx.shadowBlur = 0;
+      this.ctx.fillText(`Round ${this.scores.p1 + this.scores.p2 + 1} starting soon...`, Constants.GAME_WIDTH / 2, Constants.GAME_HEIGHT / 2 + 50);
+
+      this.ctx.restore();
     }
   }
 

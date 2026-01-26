@@ -59,6 +59,19 @@ export class NetworkManager {
         this.callbacks = { ...this.callbacks, ...callbacks };
     }
 
+    public clearCallbacks(): void {
+        this.callbacks = {};
+    }
+
+    public resetGameSessionState(): void {
+        this.inputSequence = 0;
+        this.pendingInputs = [];
+        this.latency = 0;
+        if (this.socket?.connected) {
+            this.setStatus('connected');
+        }
+    }
+
     public getStatus(): NetworkStatus {
         return this.status;
     }
