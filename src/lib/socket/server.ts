@@ -96,7 +96,7 @@ class SessionManager {
       gameState: 'waiting',
       stateSnapshot: null,
       inputBuffer: new Map(),
-      tickRate: 30, // 30 Hz server tick rate
+      tickRate: 60, // 60 Hz server tick rate (matches client FPS for real-time feel)
       tickInterval: null,
       currentTick: 0,
       createdAt: Date.now(),
@@ -761,15 +761,15 @@ function processGameTick(sessionId: string): void {
 
   for (const [playerId, inputs] of session.inputBuffer) {
     if (inputs.length > 0) {
-      // Process the most recent input
-      const input = inputs[inputs.length - 1];
-      lastProcessedInput[playerId] = input.sequenceNumber;
+      // Process ALL unprocessed inputs for better responsiveness (not just latest)
+      for (const input of inputs) {
+        lastProcessedInput[playerId] = input.sequenceNumber;
 
-      // Find the player's tank
-      const player = session.players.get(playerId);
-      if (player) {
-        const tank = session.tanks.get(player.tankId);
-        if (tank && !tank.dead) {
+        // Find the player's tank
+        const player = session.players.get(playerId);
+        if (player) {
+          const tank = session.tanks.get(player.tankId);
+          if (tank && !tank.dead) {
           // Convert PlayerInput to key state
           const keys: { [key: string]: boolean } = {};
 
@@ -805,6 +805,7 @@ function processGameTick(sessionId: string): void {
               1.0 // deltaMultiplier
             );
             session.bullets.push(...newBullets);
+          }
           }
         }
       }
@@ -895,6 +896,40 @@ function processGameTick(sessionId: string): void {
       session.suddenDeathActive = true;
     }
     session.suddenDeathInset += Constants.SUDDEN_DEATH_INSET_SPEED;
+  }
+
+  // Check if any tanks died (from sudden death, hazards, or other non-bullet causes)
+  const p1Tank = session.tanks.get(1);
+  const p2Tank = session.tanks.get(2);
+
+  if (p1Tank && p2Tank) {
+    const p1Dead = p1Tank.dead;
+    const p2Dead = p2Tank.dead;
+
+    // If both dead (simultaneous death), determine winner by who had more health before dying
+    if (p1Dead && p2Dead) {
+      // Use scores as tiebreaker, then random if tied
+      let winnerId: number;
+      if (session.scores.p1 > session.scores.p2) {
+        winnerId = 1;
+      } else if (session.scores.p2 > session.scores.p1) {
+        winnerId = 2;
+      } else {
+        // Truly tied - random winner
+        winnerId = Math.random() < 0.5 ? 1 : 2;
+      }
+      endRound(sessionId, winnerId);
+      return; // Stop processing this tick
+    }
+    // If only one dead, they lose
+    else if (p1Dead) {
+      endRound(sessionId, 2);
+      return;
+    }
+    else if (p2Dead) {
+      endRound(sessionId, 1);
+      return;
+    }
   }
 
   // Create state snapshot from actual game entities

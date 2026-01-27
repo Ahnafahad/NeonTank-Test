@@ -139,11 +139,11 @@ export class Game {
   private readonly MAX_PREDICTION_HISTORY = 60; // Keep last 60 states (1 second at 60fps)
   private remotePlayerState: RemotePlayerState | null = null;
   private serverStateBuffer: BufferedServerState[] = [];
-  private readonly INTERPOLATION_DELAY = 100; // 100ms buffer for smooth interpolation
+  private readonly INTERPOLATION_DELAY = 50; // 50ms buffer (reduced for more real-time feel)
   private readonly MAX_BUFFER_SIZE = 10; // Keep last 10 server states
   private lastServerState: GameStateSnapshot | null = null;
-  private readonly RECONCILIATION_THRESHOLD_SMOOTH = 10; // Smooth correction for small errors (pixels)
-  private readonly RECONCILIATION_THRESHOLD_SNAP = 50; // Instant snap for large errors (pixels)
+  private readonly RECONCILIATION_THRESHOLD_SMOOTH = 15; // Smooth correction for small errors (pixels)
+  private readonly RECONCILIATION_THRESHOLD_SNAP = 100; // Instant snap for large errors (pixels)
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -489,7 +489,7 @@ export class Game {
       // Small error - smooth correction without replay
       console.log(`[Reconciliation] SMOOTH: error=${positionError.toFixed(2)}px`);
 
-      const alpha = 0.6; // 60% correction per update (faster convergence)
+      const alpha = 0.8; // 80% correction per update (very fast convergence for real-time feel)
       localTank.pos.x += (serverTank.x - localTank.pos.x) * alpha;
       localTank.pos.y += (serverTank.y - localTank.pos.y) * alpha;
 
