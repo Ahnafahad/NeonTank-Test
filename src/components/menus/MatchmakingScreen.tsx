@@ -62,7 +62,11 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
           });
         } else {
           console.log('[MatchmakingScreen] Finding match...');
-          await findMatch();
+          await findMatch({
+            scoreLimitValue,
+            timeLimitEnabled,
+            timeLimitSeconds,
+          });
         }
       };
       startMatchmaking();

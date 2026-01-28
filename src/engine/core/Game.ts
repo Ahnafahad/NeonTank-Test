@@ -224,7 +224,8 @@ export class Game {
     this.createMap();
 
     // Create players
-    const p1Controls: TankControls = {
+    // Define control schemes
+    const wasdControls: TankControls = {
       up: 'KeyW',
       down: 'KeyS',
       left: 'KeyA',
@@ -232,13 +233,35 @@ export class Game {
       shoot: 'Space',
     };
 
-    const p2Controls: TankControls = {
+    const arrowControls: TankControls = {
       up: 'ArrowUp',
       down: 'ArrowDown',
       left: 'ArrowLeft',
       right: 'ArrowRight',
       shoot: 'Enter',
     };
+
+    // Assign controls based on mode and settings
+    let p1Controls: TankControls;
+    let p2Controls: TankControls;
+
+    if (this.mode === 'online' && this.assignedTankId && this.settings.localPlayerControls) {
+      // Online mode: assign based on user choice and tank assignment
+      const localControls = this.settings.localPlayerControls === 'wasd' ? wasdControls : arrowControls;
+      const remoteControls = this.settings.localPlayerControls === 'wasd' ? arrowControls : wasdControls;
+
+      if (this.assignedTankId === 1) {
+        p1Controls = localControls;  // Local player is red tank
+        p2Controls = remoteControls; // Remote player is blue tank
+      } else {
+        p1Controls = remoteControls; // Remote player is red tank
+        p2Controls = localControls;  // Local player is blue tank
+      }
+    } else {
+      // Local/AI mode: default assignment
+      p1Controls = wasdControls;
+      p2Controls = arrowControls;
+    }
 
     this.p1 = new Tank(1, 100, 350, Constants.PLAYER1_COLOR, p1Controls);
     this.p2 = new Tank(2, 900, 350, Constants.PLAYER2_COLOR, p2Controls);

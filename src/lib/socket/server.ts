@@ -898,6 +898,41 @@ function processGameTick(sessionId: string): void {
     session.suddenDeathInset += Constants.SUDDEN_DEATH_INSET_SPEED;
   }
 
+  // Check timer win condition
+  if (session.settings?.timeLimitEnabled) {
+    const timeLimit = session.settings.timeLimitSeconds * 1000; // Convert to milliseconds
+    if (gameTime >= timeLimit) {
+      // Time expired - determine winner by score, then health
+      let winnerId: number;
+
+      if (session.scores.p1 > session.scores.p2) {
+        winnerId = 1;
+      } else if (session.scores.p2 > session.scores.p1) {
+        winnerId = 2;
+      } else {
+        // Tied score - use health as tiebreaker
+        const p1Tank = session.tanks.get(1);
+        const p2Tank = session.tanks.get(2);
+
+        if (p1Tank && p2Tank) {
+          if (p1Tank.health > p2Tank.health) {
+            winnerId = 1;
+          } else if (p2Tank.health > p1Tank.health) {
+            winnerId = 2;
+          } else {
+            // Perfect tie - random winner
+            winnerId = Math.random() < 0.5 ? 1 : 2;
+          }
+        } else {
+          winnerId = 1; // Fallback
+        }
+      }
+
+      endRound(sessionId, winnerId);
+      return; // Stop processing this tick
+    }
+  }
+
   // Check if any tanks died (from sudden death, hazards, or other non-bullet causes)
   const p1Tank = session.tanks.get(1);
   const p2Tank = session.tanks.get(2);

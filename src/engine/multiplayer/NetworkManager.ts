@@ -233,7 +233,9 @@ export class NetworkManager {
     // Matchmaking
     // ============================================================================
 
-    public async findMatch(): Promise<SessionInfo> {
+    public async findMatch(
+        gameSettings?: { scoreLimitValue: number; timeLimitEnabled: boolean; timeLimitSeconds: number }
+    ): Promise<SessionInfo> {
         if (!this.socket?.connected) {
             await this.connect();
         }
@@ -259,10 +261,10 @@ export class NetworkManager {
 
             if (data.status === 'matched' && data.sessionId) {
                 // Match found immediately! Join the session
-                return this.joinSession(data.sessionId);
+                return this.joinSession(data.sessionId, gameSettings);
             } else if (data.status === 'queued' && data.sessionId) {
                 // Waiting for match, join our session and poll for opponent
-                const session = await this.joinSession(data.sessionId);
+                const session = await this.joinSession(data.sessionId, gameSettings);
 
                 // Start polling for opponent
                 if (session.players.length === 1) {

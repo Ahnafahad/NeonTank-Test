@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useGameStore } from '@/store/useGameStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
+import { useMultiplayerStore } from '@/store/useMultiplayerStore';
 import { useResponsiveCanvas, useIsMobile } from '@/hooks/useResponsiveCanvas';
 import { Game } from '@/engine/core/Game';
 import { Constants } from '@/engine/utils/Constants';
@@ -30,6 +31,7 @@ function GameContent() {
   const [aiDifficulty, setAIDifficulty] = useState<AIDifficulty>('medium');
   const [onlinePlayerName, setOnlinePlayerName] = useState('');
   const [onlineControlScheme, setOnlineControlScheme] = useState<'wasd' | 'arrows'>('wasd');
+  const [displayScores, setDisplayScores] = useState({ p1: 0, p2: 0 });
 
   const searchParams = useSearchParams();
   const joinSessionId = searchParams.get('session');
@@ -51,6 +53,9 @@ function GameContent() {
   // Get all settings from store
   const settingsStore = useSettingsStore();
 
+  // Get multiplayer store for player names
+  const { playerName: multiplayerPlayerName, opponentName } = useMultiplayerStore();
+
   // Auto-join if session ID is present
   useEffect(() => {
     if (joinSessionId && !showMatchmaking && currentScreen === 'menu') {
@@ -70,6 +75,10 @@ function GameContent() {
   // Game stats polling
   const pollGameStats = useCallback(() => {
     if (gameRef.current && gameRef.current.state === 'playing') {
+      // Get scores from game engine (works for all modes including online)
+      const currentScores = gameRef.current.getScores();
+      setDisplayScores(currentScores);
+
       updateStats({
         p1Health: gameRef.current.getP1Health(),
         p2Health: gameRef.current.getP2Health(),
@@ -380,7 +389,9 @@ function GameContent() {
       {/* HUD */}
       <div className="w-full px-4 py-2 flex justify-between items-center shrink-0" style={{ height: '80px' }}>
         <div className="text-left">
-          <div className="text-[#ff0055] font-bold text-sm mb-1">PLAYER 1</div>
+          <div className="text-[#ff0055] font-bold text-sm mb-1">
+            {mode === 'online' ? (multiplayerPlayerName || 'PLAYER 1') : 'PLAYER 1'}
+          </div>
           <div className="w-32 md:w-48 h-4 bg-black border border-[#ff0055] rounded overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-[#88002d] to-[#ff0055] transition-all duration-200"
@@ -391,9 +402,9 @@ function GameContent() {
 
         <div className="text-center">
           <div className="text-2xl font-bold">
-            <span className="text-[#ff0055]">{scores.p1}</span>
+            <span className="text-[#ff0055]">{displayScores.p1}</span>
             <span className="text-white mx-2">-</span>
-            <span className="text-[#00ffff]">{scores.p2}</span>
+            <span className="text-[#00ffff]">{displayScores.p2}</span>
           </div>
           <div className={`text-sm ${currentStats.suddenDeath ? 'text-red-500 animate-pulse font-bold' : 'text-gray-400'}`}>
             {currentStats.suddenDeath ? 'SUDDEN DEATH!' : `Time: ${formatTime(currentStats.elapsedTime)}`}
@@ -402,7 +413,11 @@ function GameContent() {
 
         <div className="text-right">
           <div className="text-[#00ffff] font-bold text-sm mb-1">
-            {mode === 'ai' ? `CPU (${aiDifficulty.charAt(0).toUpperCase()})` : 'PLAYER 2'}
+            {mode === 'ai'
+              ? `CPU (${aiDifficulty.charAt(0).toUpperCase()})`
+              : mode === 'online'
+                ? (opponentName || 'PLAYER 2')
+                : 'PLAYER 2'}
           </div>
           <div className="w-32 md:w-48 h-4 bg-black border border-[#00ffff] rounded overflow-hidden">
             <div
