@@ -11,7 +11,7 @@ import { TankAI, AIDifficulty } from '../ai';
 import { NetworkManager } from '../multiplayer/NetworkManager';
 import type { GameStateSnapshot, SerializedTank } from '@/lib/socket/events';
 
-export type GameMode = 'local' | 'ai' | 'online';
+export type GameMode = 'local' | 'ai' | 'online' | 'lan';
 export type GameState = 'menu' | 'playing' | 'paused' | 'gameover';
 
 // Client-side prediction state
@@ -141,7 +141,7 @@ export class Game {
   private serverStateBuffer: BufferedServerState[] = [];
   private readonly MIN_INTERPOLATION_DELAY = 50; // Minimum buffer (ms) - adjusted for 30Hz
   private readonly MAX_INTERPOLATION_DELAY = 150; // Maximum buffer (ms) - adjusted for 30Hz
-  private interpolationDelay = 66; // Dynamic interpolation delay (starts at ~2 ticks at 30Hz)
+  private interpolationDelay = 66; // Dynamic interpolation delay (starts at ~2 ticks at 30Hz), 0 for LAN
   private jitterSamples: number[] = []; // Track jitter over time
   private readonly MAX_JITTER_SAMPLES = 60; // 1 second at 60fps
   private lastStateReceivedTime = 0; // Track when states arrive
@@ -166,6 +166,11 @@ export class Game {
 
     this.mode = mode;
     this.inputManager = new InputManager();
+
+    // Set interpolation delay based on mode
+    if (this.mode === 'lan') {
+      this.interpolationDelay = 0; // Zero interpolation for LAN (instant state application)
+    }
 
     // Default settings (all features enabled)
     this.settings = {
@@ -1318,6 +1323,13 @@ export class Game {
   // Expose InputManager for mobile controls
   public getInputManager(): InputManager {
     return this.inputManager;
+  }
+
+  // LAN connection setup (placeholder for future integration)
+  public setLANConnection(isHost: boolean, server: any, client: any): void {
+    console.log('[Game] LAN connection set:', { isHost, server, client });
+    // TODO: Integrate LAN server/client with game loop
+    // This will be implemented when we create LANNetworkManager
   }
 
   // AI difficulty control

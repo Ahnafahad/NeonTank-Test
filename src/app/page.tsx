@@ -11,7 +11,11 @@ import { Constants } from '@/engine/utils/Constants';
 import { Vector } from '@/engine/utils/Vector';
 import { MobileControls } from '@/components/mobile';
 import { MatchmakingScreen } from '@/components/menus/MatchmakingScreen';
+import { LANLobby } from '@/components/menus/LANLobby';
 import { getNetworkManager } from '@/engine/multiplayer/NetworkManager';
+import { createLANNetworkManager } from '@/engine/multiplayer/LANNetworkManager';
+import type { LocalMultiplayerServer } from '@/lib/socket/localServer';
+import type { LocalMultiplayerClient } from '@/lib/socket/localClient';
 import type { AIDifficulty } from '@/engine/ai';
 
 export default function HomePage() {
@@ -28,10 +32,14 @@ function GameContent() {
   const animationRef = useRef<number | null>(null);
   const [showAIDifficultySelect, setShowAIDifficultySelect] = useState(false);
   const [showMatchmaking, setShowMatchmaking] = useState(false);
+  const [showLANLobby, setShowLANLobby] = useState(false);
   const [aiDifficulty, setAIDifficulty] = useState<AIDifficulty>('medium');
   const [onlinePlayerName, setOnlinePlayerName] = useState('');
   const [onlineControlScheme, setOnlineControlScheme] = useState<'wasd' | 'arrows'>('wasd');
   const [displayScores, setDisplayScores] = useState({ p1: 0, p2: 0 });
+  const [lanServer, setLanServer] = useState<LocalMultiplayerServer | null>(null);
+  const [lanClient, setLanClient] = useState<LocalMultiplayerClient | null>(null);
+  const [isLanHost, setIsLanHost] = useState(false);
 
   const searchParams = useSearchParams();
   const joinSessionId = searchParams.get('session');
@@ -147,6 +155,31 @@ function GameContent() {
           ...gameSettings,
           localPlayerControls: onlineControlScheme,
         }, networkManager);
+      } else if (mode === 'lan') {
+        // Create LAN network manager
+        const lanNetworkManager = isLanHost && lanServer
+          ? createLANNetworkManager('host', lanServer)
+          : !isLanHost && lanClient
+          ? createLANNetworkManager('guest', lanClient)
+          : null;
+
+        if (!lanNetworkManager) {
+          console.error('[LAN] Failed to create LAN network manager');
+          return;
+        }
+
+        gameRef.current = new Game(canvasRef.current, mode, {
+          ...gameSettings,
+          localPlayerControls: 'wasd', // Default for now, can be made configurable
+        });
+
+        // Set up LAN connection callbacks
+        lanNetworkManager.setCallbacks({
+          onConnectionLost: () => {
+            console.log('[LAN] Connection lost');
+            endGame(isLanHost ? 1 : 2); // End game if connection lost
+          }
+        });
       } else {
         gameRef.current = new Game(canvasRef.current, mode, gameSettings);
       }
@@ -173,6 +206,18 @@ function GameContent() {
     if (currentScreen === 'menu' && mode === 'online') {
       getNetworkManager().disconnect();
     }
+
+    // If we left LAN mode, disconnect
+    if (currentScreen === 'menu' && mode === 'lan') {
+      if (lanServer) {
+        lanServer.destroy();
+        setLanServer(null);
+      }
+      if (lanClient) {
+        lanClient.destroy();
+        setLanClient(null);
+      }
+    }
   }, [currentScreen, mode]);
 
   const handleRematch = () => {
@@ -183,13 +228,17 @@ function GameContent() {
     startGame();
   };
 
-  const handleStartGame = (selectedMode: 'local' | 'ai' | 'online') => {
+  const handleStartGame = (selectedMode: 'local' | 'ai' | 'online' | 'lan') => {
     if (selectedMode === 'ai') {
       setShowAIDifficultySelect(true);
       return;
     }
     if (selectedMode === 'online') {
       setShowMatchmaking(true);
+      return;
+    }
+    if (selectedMode === 'lan') {
+      setShowLANLobby(true);
       return;
     }
     setMode(selectedMode);
@@ -208,6 +257,19 @@ function GameContent() {
     setShowMatchmaking(false);
   };
 
+  const handleCancelLANLobby = () => {
+    setShowLANLobby(false);
+  };
+
+  const handleLANGameStart = (isHost: boolean, server: LocalMultiplayerServer | null, client: LocalMultiplayerClient | null) => {
+    setShowLANLobby(false);
+    setIsLanHost(isHost);
+    setLanServer(server);
+    setLanClient(client);
+    setMode('lan');
+    startGame();
+  };
+
   const handleStartAIGame = (difficulty: AIDifficulty) => {
     setAIDifficulty(difficulty);
     setShowAIDifficultySelect(false);
@@ -224,6 +286,16 @@ function GameContent() {
 
   // Main Menu Screen
   if (currentScreen === 'menu') {
+    // LAN Lobby
+    if (showLANLobby) {
+      return (
+        <LANLobby
+          onBack={handleCancelLANLobby}
+          onGameStart={handleLANGameStart}
+        />
+      );
+    }
+
     // Online Matchmaking
     if (showMatchmaking) {
       return (
@@ -302,6 +374,13 @@ function GameContent() {
             className="px-8 py-4 text-xl font-bold border-2 border-purple-500 text-white rounded-full hover:bg-purple-500 hover:shadow-[0_0_30px_rgba(168,85,247,0.5)] transition-all duration-200 uppercase tracking-wider"
           >
             Online Battle
+          </button>
+
+          <button
+            onClick={() => handleStartGame('lan')}
+            className="px-8 py-4 text-xl font-bold border-2 border-green-500 text-white rounded-full hover:bg-green-500 hover:shadow-[0_0_30px_rgba(34,197,94,0.5)] transition-all duration-200 uppercase tracking-wider"
+          >
+            LAN Multiplayer
           </button>
 
           <button

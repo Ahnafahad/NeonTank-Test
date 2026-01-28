@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 
-export type GameMode = 'local' | 'ai' | 'online' | 'options';
+export type GameMode = 'local' | 'ai' | 'online' | 'lan' | 'options';
 
 interface MainMenuProps {
   onSelectMode: (mode: GameMode) => void;
@@ -12,6 +12,7 @@ const menuButtons: { label: string; mode: GameMode }[] = [
   { label: 'LOCAL 2-PLAYER', mode: 'local' },
   { label: 'VS COMPUTER', mode: 'ai' },
   { label: 'ONLINE', mode: 'online' },
+  { label: 'LAN MULTIPLAYER', mode: 'lan' },
   { label: 'OPTIONS', mode: 'options' },
 ];
 

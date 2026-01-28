@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 
-export type GameMode = 'local' | 'ai' | 'online';
+export type GameMode = 'local' | 'ai' | 'online' | 'lan';
 export type GameScreen = 'menu' | 'modeSelect' | 'options' | 'playing' | 'gameover';
 export type AIDifficulty = 'easy' | 'medium' | 'hard';
 export type PlayerControls = 'wasd' | 'arrows';
