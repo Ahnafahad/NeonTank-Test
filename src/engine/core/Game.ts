@@ -139,11 +139,19 @@ export class Game {
   private readonly MAX_PREDICTION_HISTORY = 60; // Keep last 60 states (1 second at 60fps)
   private remotePlayerState: RemotePlayerState | null = null;
   private serverStateBuffer: BufferedServerState[] = [];
-  private readonly INTERPOLATION_DELAY = 50; // 50ms buffer (reduced for more real-time feel)
+  private readonly MIN_INTERPOLATION_DELAY = 50; // Minimum buffer (ms) - adjusted for 30Hz
+  private readonly MAX_INTERPOLATION_DELAY = 150; // Maximum buffer (ms) - adjusted for 30Hz
+  private interpolationDelay = 66; // Dynamic interpolation delay (starts at ~2 ticks at 30Hz)
+  private jitterSamples: number[] = []; // Track jitter over time
+  private readonly MAX_JITTER_SAMPLES = 60; // 1 second at 60fps
+  private lastStateReceivedTime = 0; // Track when states arrive
   private readonly MAX_BUFFER_SIZE = 10; // Keep last 10 server states
   private lastServerState: GameStateSnapshot | null = null;
   private readonly RECONCILIATION_THRESHOLD_SMOOTH = 15; // Smooth correction for small errors (pixels)
   private readonly RECONCILIATION_THRESHOLD_SNAP = 100; // Instant snap for large errors (pixels)
+  // Dead reckoning
+  private remotePlayerVelocity = { x: 0, y: 0 }; // Track remote player velocity
+  private readonly MAX_EXTRAPOLATION_TIME = 100; // Max time to extrapolate (ms)
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -357,10 +365,27 @@ export class Game {
   }
 
   private applyServerState(state: GameStateSnapshot): void {
+    const now = Date.now();
+
+    // Track jitter for adaptive buffer
+    if (this.lastStateReceivedTime > 0) {
+      const timeSinceLastState = now - this.lastStateReceivedTime;
+      this.jitterSamples.push(timeSinceLastState);
+
+      // Keep only recent samples
+      if (this.jitterSamples.length > this.MAX_JITTER_SAMPLES) {
+        this.jitterSamples.shift();
+      }
+
+      // Update adaptive interpolation delay
+      this.updateInterpolationDelay();
+    }
+    this.lastStateReceivedTime = now;
+
     // Buffer the server state for interpolation
     this.serverStateBuffer.push({
       state: state,
-      receivedTime: Date.now(),
+      receivedTime: now,
     });
 
     // Keep buffer size manageable
@@ -383,10 +408,20 @@ export class Game {
   }
 
   private applyNonPlayerGameState(state: GameStateSnapshot): void {
+    // Merge delta state with last full state
+    const mergedState = this.mergeDeltaState(state, this.lastServerState);
 
     // VFX: Detect removed bullets from server state to trigger explosions
-    if (this.lastServerState) {
-      const currentBulletIds = new Set(state.bullets.map(b => b.id));
+    if (state.removedBullets && state.removedBullets.length > 0) {
+      for (const bulletId of state.removedBullets) {
+        const bullet = this.bullets.find(b => b.id === bulletId);
+        if (bullet) {
+          this.createExplosion(bullet.pos.x, bullet.pos.y, bullet.color, 5);
+        }
+      }
+    } else if (this.lastServerState) {
+      // Fallback: compare full states if no removedBullets provided
+      const currentBulletIds = new Set(mergedState.bullets.map(b => b.id));
       for (const prevBullet of this.lastServerState.bullets) {
         if (!currentBulletIds.has(prevBullet.id)) {
           this.createExplosion(prevBullet.x, prevBullet.y, prevBullet.color, 5);
@@ -398,7 +433,7 @@ export class Game {
     const existingBullets = new Map<string, Bullet>();
     this.bullets.forEach(b => existingBullets.set(b.id, b));
 
-    this.bullets = state.bullets.map((bulletData) => {
+    this.bullets = mergedState.bullets.map((bulletData) => {
       let bullet = existingBullets.get(bulletData.id);
 
       if (bullet) {
@@ -430,7 +465,7 @@ export class Game {
     });
 
     // Apply powerup states
-    this.powerups = state.powerups
+    this.powerups = mergedState.powerups
       .filter((p) => p.active)
       .map((powerupData) => {
         const powerup = new PowerUp(powerupData.x, powerupData.y, powerupData.type);
@@ -439,7 +474,7 @@ export class Game {
 
     // Apply wall states (crates can be destroyed)
     const updatedCrates: Wall[] = [];
-    for (const wallData of state.walls) {
+    for (const wallData of mergedState.walls) {
       if (wallData.destructible && wallData.active) {
         const crate = new Wall(wallData.x, wallData.y, wallData.w, wallData.h, true);
         if (wallData.health !== undefined) {
@@ -451,14 +486,83 @@ export class Game {
     this.crates = updatedCrates;
 
     // Apply scores
-    this.scores = state.scores;
+    this.scores = mergedState.scores;
 
     // Apply sudden death state
-    this.suddenDeathActive = state.suddenDeath;
-    this.suddenDeathInset = state.suddenDeathInset;
+    this.suddenDeathActive = mergedState.suddenDeath;
+    this.suddenDeathInset = mergedState.suddenDeathInset;
 
     // Update game start time to match server game time (server sends in seconds, convert to ms)
-    this.gameStartTime = Date.now() - (state.gameTime * 1000);
+    this.gameStartTime = Date.now() - (mergedState.gameTime * 1000);
+  }
+
+  private mergeDeltaState(
+    deltaState: GameStateSnapshot,
+    lastFullState: GameStateSnapshot | null
+  ): GameStateSnapshot {
+    // If not a delta or no previous state, return as-is
+    if (!deltaState.isDelta || !lastFullState) {
+      return deltaState;
+    }
+
+    // Merge delta with last full state
+    const merged: GameStateSnapshot = {
+      ...deltaState,
+      tanks: [...lastFullState.tanks],
+      bullets: [...lastFullState.bullets],
+      powerups: [...lastFullState.powerups],
+      walls: [...lastFullState.walls],
+      hazards: [...lastFullState.hazards],
+    };
+
+    // Update tanks with delta changes
+    for (const deltaTank of deltaState.tanks) {
+      const index = merged.tanks.findIndex((t) => t.id === deltaTank.id);
+      if (index >= 0) {
+        merged.tanks[index] = deltaTank;
+      } else {
+        merged.tanks.push(deltaTank);
+      }
+    }
+
+    // Update bullets with delta changes
+    // First, remove bullets marked as removed
+    if (deltaState.removedBullets && deltaState.removedBullets.length > 0) {
+      const removedSet = new Set(deltaState.removedBullets);
+      merged.bullets = merged.bullets.filter((b) => !removedSet.has(b.id));
+    }
+
+    // Then, add/update bullets from delta
+    for (const deltaBullet of deltaState.bullets) {
+      const index = merged.bullets.findIndex((b) => b.id === deltaBullet.id);
+      if (index >= 0) {
+        merged.bullets[index] = deltaBullet;
+      } else {
+        merged.bullets.push(deltaBullet);
+      }
+    }
+
+    // Update powerups with delta changes
+    for (const deltaPowerup of deltaState.powerups) {
+      const index = merged.powerups.findIndex((p) => p.id === deltaPowerup.id);
+      if (index >= 0) {
+        merged.powerups[index] = deltaPowerup;
+      } else {
+        merged.powerups.push(deltaPowerup);
+      }
+    }
+
+    // Update walls with delta changes
+    for (const deltaWall of deltaState.walls) {
+      const index = merged.walls.findIndex((w) => w.id === deltaWall.id);
+      if (index >= 0) {
+        merged.walls[index] = deltaWall;
+      } else {
+        merged.walls.push(deltaWall);
+      }
+    }
+
+    return merged;
   }
 
   private reconcileWithServer(serverState: GameStateSnapshot): void {
@@ -618,6 +722,23 @@ export class Game {
     }
   }
 
+  private updateInterpolationDelay(): void {
+    if (this.jitterSamples.length < 10) return; // Need enough samples
+
+    // Calculate average jitter (time between state updates)
+    const avgJitter = this.jitterSamples.reduce((a, b) => a + b, 0) / this.jitterSamples.length;
+
+    // Calculate target delay: 3x average jitter (safe buffer)
+    const targetDelay = Math.min(
+      this.MAX_INTERPOLATION_DELAY,
+      Math.max(this.MIN_INTERPOLATION_DELAY, avgJitter * 3)
+    );
+
+    // Smooth adjustment with 10% alpha filter
+    const alpha = 0.1;
+    this.interpolationDelay = this.interpolationDelay * (1 - alpha) + targetDelay * alpha;
+  }
+
   private updateRemotePlayerInterpolation(serverState: GameStateSnapshot): void {
     if (!this.assignedTankId) return;
 
@@ -626,8 +747,8 @@ export class Game {
 
     if (!serverRemoteTank) return;
 
-    // Use interpolation buffer to smooth out remote player movement
-    const renderTime = Date.now() - this.INTERPOLATION_DELAY;
+    // Use adaptive interpolation buffer to smooth out remote player movement
+    const renderTime = Date.now() - this.interpolationDelay;
 
     // Find two states to interpolate between
     let fromState: BufferedServerState | null = null;
@@ -674,12 +795,42 @@ export class Game {
         }
         remoteTank.dead = toTank.dead;
 
+        // Update velocity for dead reckoning
+        const deltaTime = toState.receivedTime - fromState.receivedTime;
+        if (deltaTime > 0) {
+          this.remotePlayerVelocity.x = (toTank.x - fromTank.x) / deltaTime * 1000; // pixels/sec
+          this.remotePlayerVelocity.y = (toTank.y - fromTank.y) / deltaTime * 1000;
+        }
+
         return;
       }
     }
 
-    // Fallback: use latest server state directly
+    // Fallback: No interpolation buffer available
+    // Use dead reckoning if packet loss detected
     const remoteTank = remoteTankId === 1 ? this.p1 : this.p2;
+    const timeSinceLastUpdate = Date.now() - this.lastStateReceivedTime;
+
+    if (timeSinceLastUpdate < this.MAX_EXTRAPOLATION_TIME && this.lastServerState) {
+      // Extrapolate position using last known velocity
+      const lastRemoteTank = this.lastServerState.tanks.find((t) => t.id === remoteTankId);
+      if (lastRemoteTank) {
+        const dt = timeSinceLastUpdate / 1000; // Convert to seconds
+        let extrapolatedX = lastRemoteTank.x + this.remotePlayerVelocity.x * dt;
+        let extrapolatedY = lastRemoteTank.y + this.remotePlayerVelocity.y * dt;
+
+        // Clamp to map bounds
+        extrapolatedX = Math.max(20, Math.min(Constants.GAME_WIDTH - 20, extrapolatedX));
+        extrapolatedY = Math.max(20, Math.min(Constants.GAME_HEIGHT - 20, extrapolatedY));
+
+        remoteTank.pos.x = extrapolatedX;
+        remoteTank.pos.y = extrapolatedY;
+        // Keep other properties from last known state
+        return;
+      }
+    }
+
+    // Final fallback: use latest server state directly
     remoteTank.pos.x = serverRemoteTank.x;
     remoteTank.pos.y = serverRemoteTank.y;
     remoteTank.angle = serverRemoteTank.angle;
@@ -696,6 +847,10 @@ export class Game {
       remoteTank.reloadTimer = remoteTank.reloadDuration * (1 - serverRemoteTank.reloadProgress);
     }
     remoteTank.dead = serverRemoteTank.dead;
+
+    // Reset velocity if directly snapping to server state
+    this.remotePlayerVelocity.x = 0;
+    this.remotePlayerVelocity.y = 0;
   }
 
   // Linear interpolation helper

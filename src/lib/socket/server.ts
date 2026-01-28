@@ -23,6 +23,7 @@ import { PowerUp, PowerUpType } from '@/engine/entities/PowerUp';
 import { Wall } from '@/engine/entities/Wall';
 import { Hazard } from '@/engine/entities/Hazard';
 import { Constants } from '@/engine/utils/Constants';
+import { SpatialGrid } from '@/engine/utils/SpatialGrid';
 
 // ============================================================================
 // Types
@@ -78,6 +79,10 @@ export interface GameSession {
     timeLimitEnabled: boolean;
     timeLimitSeconds: number;
   };
+  // Delta compression
+  lastBroadcastState: GameStateSnapshot | null;
+  // Spatial partitioning
+  spatialGrid: SpatialGrid<Tank | Bullet>;
 }
 
 // ============================================================================
@@ -96,7 +101,7 @@ class SessionManager {
       gameState: 'waiting',
       stateSnapshot: null,
       inputBuffer: new Map(),
-      tickRate: 60, // 60 Hz server tick rate (matches client FPS for real-time feel)
+      tickRate: 30, // 30 Hz server tick rate (reduced from 60 for bandwidth/CPU savings)
       tickInterval: null,
       currentTick: 0,
       createdAt: Date.now(),
@@ -115,6 +120,10 @@ class SessionManager {
       lastPowerUpTime: Date.now(),
       suddenDeathActive: false,
       suddenDeathInset: 0,
+      // Delta compression
+      lastBroadcastState: null,
+      // Spatial partitioning
+      spatialGrid: new SpatialGrid(Constants.GAME_WIDTH, Constants.GAME_HEIGHT, 100),
     };
 
     this.sessions.set(sessionId, session);
@@ -707,6 +716,170 @@ function startGame(sessionId: string): void {
   }, 1000 / session.tickRate);
 }
 
+// ============================================================================
+// Input Processing Helpers
+// ============================================================================
+
+function deduplicateInputs(inputs: PlayerInput[]): PlayerInput[] {
+  const seen = new Set<number>();
+  const unique: PlayerInput[] = [];
+
+  for (const input of inputs) {
+    if (!seen.has(input.sequenceNumber)) {
+      seen.add(input.sequenceNumber);
+      unique.push(input);
+    }
+  }
+
+  // Sort by sequence number for correct replay order
+  return unique.sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+}
+
+function batchIdenticalInputs(inputs: PlayerInput[]): PlayerInput[] {
+  if (inputs.length === 0) return inputs;
+
+  const batched: PlayerInput[] = [];
+  let lastInput: PlayerInput | null = null;
+
+  for (const input of inputs) {
+    if (!lastInput || !inputsEqual(input, lastInput)) {
+      // Input changed, keep it
+      batched.push(input);
+      lastInput = input;
+    }
+    // If inputs are identical, skip (batch them together)
+  }
+
+  return batched;
+}
+
+function inputsEqual(a: PlayerInput, b: PlayerInput): boolean {
+  return (
+    a.movement.x === b.movement.x &&
+    a.movement.y === b.movement.y &&
+    a.shoot === b.shoot &&
+    a.chargeLevel === b.chargeLevel
+  );
+}
+
+// ============================================================================
+// Delta Compression Helpers
+// ============================================================================
+
+function computeStateDelta(
+  currentState: GameStateSnapshot,
+  lastState: GameStateSnapshot | null,
+  isSlowTick: boolean
+): GameStateSnapshot {
+  if (!lastState) {
+    // First state - send full snapshot
+    return currentState;
+  }
+
+  // Create delta state
+  const delta: GameStateSnapshot = {
+    ...currentState,
+    isDelta: true,
+    tanks: [],
+    bullets: [],
+    powerups: [],
+    walls: [],
+    hazards: [],
+    removedBullets: [],
+  };
+
+  // 1. Tanks - include only if changed (position, angle, health, ammo)
+  for (const tank of currentState.tanks) {
+    const lastTank = lastState.tanks.find((t) => t.id === tank.id);
+    if (!lastTank || tankHasChanged(tank, lastTank)) {
+      delta.tanks.push(tank);
+    }
+  }
+
+  // 2. Bullets - include new bullets and bullets that moved significantly
+  const lastBulletIds = new Set(lastState.bullets.map((b) => b.id));
+  const currentBulletIds = new Set(currentState.bullets.map((b) => b.id));
+
+  for (const bullet of currentState.bullets) {
+    const isNew = !lastBulletIds.has(bullet.id);
+    if (isNew) {
+      delta.bullets.push(bullet);
+    } else {
+      const lastBullet = lastState.bullets.find((b) => b.id === bullet.id);
+      if (lastBullet && bulletHasMoved(bullet, lastBullet)) {
+        delta.bullets.push(bullet);
+      }
+    }
+  }
+
+  // Track removed bullets
+  for (const lastBullet of lastState.bullets) {
+    if (!currentBulletIds.has(lastBullet.id)) {
+      delta.removedBullets!.push(lastBullet.id);
+    }
+  }
+
+  // 3. Powerups - LOW PRIORITY: update every 4th tick (7.5Hz at 30Hz server)
+  if (isSlowTick) {
+    for (const powerup of currentState.powerups) {
+      const lastPowerup = lastState.powerups.find((p) => p.id === powerup.id);
+      if (!lastPowerup || powerup.active !== lastPowerup.active) {
+        delta.powerups.push(powerup);
+      }
+    }
+  } else {
+    // On fast ticks, keep last powerup state
+    delta.powerups = lastState.powerups;
+  }
+
+  // 4. Walls - LOW PRIORITY: update every 4th tick (only destructible walls that took damage)
+  if (isSlowTick) {
+    for (const wall of currentState.walls) {
+      if (!wall.destructible) continue; // Skip indestructible walls
+      const lastWall = lastState.walls.find((w) => w.id === wall.id);
+      if (!lastWall || wall.health !== lastWall.health || wall.active !== lastWall.active) {
+        delta.walls.push(wall);
+      }
+    }
+  } else {
+    // On fast ticks, keep last wall state
+    delta.walls = lastState.walls;
+  }
+
+  // 5. Hazards - LOW PRIORITY: static, never send in delta after first state
+  delta.hazards = [];
+
+  // 6. Scores - always include (small size)
+  // Already included in delta via spread
+
+  return delta;
+}
+
+function tankHasChanged(tank: SerializedTank, lastTank: SerializedTank): boolean {
+  const posChanged = Math.abs(tank.x - lastTank.x) > 0.1 || Math.abs(tank.y - lastTank.y) > 0.1;
+  const angleChanged = Math.abs(tank.angle - lastTank.angle) > 0.01;
+  const healthChanged = tank.health !== lastTank.health;
+  const ammoChanged = tank.ammo !== lastTank.ammo;
+  const stateChanged =
+    tank.isReloading !== lastTank.isReloading ||
+    tank.isCharging !== lastTank.isCharging ||
+    tank.dead !== lastTank.dead;
+  const powerupChanged =
+    tank.speedTimer !== lastTank.speedTimer ||
+    tank.shieldTimer !== lastTank.shieldTimer ||
+    tank.weaponTimer !== lastTank.weaponTimer ||
+    tank.currentWeapon !== lastTank.currentWeapon;
+
+  return posChanged || angleChanged || healthChanged || ammoChanged || stateChanged || powerupChanged;
+}
+
+function bulletHasMoved(bullet: SerializedBullet, lastBullet: SerializedBullet): boolean {
+  const distMoved = Math.sqrt(
+    Math.pow(bullet.x - lastBullet.x, 2) + Math.pow(bullet.y - lastBullet.y, 2)
+  );
+  return distMoved > 0.5; // Only send if moved more than 0.5 pixels
+}
+
 function processGameTick(sessionId: string): void {
   const session = sessionManager.getSession(sessionId);
   if (!session || !io) return;
@@ -761,8 +934,14 @@ function processGameTick(sessionId: string): void {
 
   for (const [playerId, inputs] of session.inputBuffer) {
     if (inputs.length > 0) {
-      // Process ALL unprocessed inputs for better responsiveness (not just latest)
-      for (const input of inputs) {
+      // Deduplicate inputs by sequence number (keep only unique)
+      const uniqueInputs = deduplicateInputs(inputs);
+
+      // Batch consecutive identical inputs
+      const batchedInputs = batchIdenticalInputs(uniqueInputs);
+
+      // Process batched inputs
+      for (const input of batchedInputs) {
         lastProcessedInput[playerId] = input.sequenceNumber;
 
         // Find the player's tank
@@ -815,7 +994,24 @@ function processGameTick(sessionId: string): void {
     }
   }
 
-  // Update bullets
+  // Rebuild spatial grid for collision detection
+  session.spatialGrid.clear();
+
+  // Insert tanks into grid
+  for (const tank of session.tanks.values()) {
+    if (!tank.dead) {
+      session.spatialGrid.insert(tank);
+    }
+  }
+
+  // Insert bullets into grid
+  for (const bullet of session.bullets) {
+    if (bullet.active) {
+      session.spatialGrid.insert(bullet);
+    }
+  }
+
+  // Update bullets with spatial collision detection
   for (let i = session.bullets.length - 1; i >= 0; i--) {
     const bullet = session.bullets[i];
     bullet.update(session.walls, session.crates);
@@ -825,35 +1021,41 @@ function processGameTick(sessionId: string): void {
       continue;
     }
 
-    // Bullet-tank collision detection
-    for (const [tankId, tank] of session.tanks) {
-      if (tank.dead) continue;
-      if (bullet.ownerId === tankId) continue; // No friendly fire
+    // Bullet-tank collision detection using spatial grid
+    const nearbyTanks = session.spatialGrid.query(bullet.pos.x, bullet.pos.y, 50);
 
-      // Simple AABB collision
-      if (
-        bullet.pos.x > tank.pos.x - 18 &&
-        bullet.pos.x < tank.pos.x + 18 &&
-        bullet.pos.y > tank.pos.y - 18 &&
-        bullet.pos.y < tank.pos.y + 18
-      ) {
-        tank.hit();
-        bullet.active = false;
+    for (const entity of nearbyTanks) {
+      // Check if entity is a Tank (has id property that's a number)
+      if ('id' in entity && typeof entity.id === 'number' && 'hit' in entity) {
+        const tank = entity as Tank;
+        if (tank.dead) continue;
+        if (bullet.ownerId === tank.id) continue; // No friendly fire
 
-        // Check if tank died
-        if (tank.dead) {
-          // Update scores
-          const winnerId = tankId === 1 ? 2 : 1;
-          if (winnerId === 1) {
-            session.scores.p1++;
-          } else {
-            session.scores.p2++;
+        // Simple AABB collision
+        if (
+          bullet.pos.x > tank.pos.x - 18 &&
+          bullet.pos.x < tank.pos.x + 18 &&
+          bullet.pos.y > tank.pos.y - 18 &&
+          bullet.pos.y < tank.pos.y + 18
+        ) {
+          tank.hit();
+          bullet.active = false;
+
+          // Check if tank died
+          if (tank.dead) {
+            // Update scores
+            const winnerId = tank.id === 1 ? 2 : 1;
+            if (winnerId === 1) {
+              session.scores.p1++;
+            } else {
+              session.scores.p2++;
+            }
+
+            // End round
+            endRound(sessionId, winnerId);
           }
-
-          // End round
-          endRound(sessionId, winnerId);
+          break;
         }
-        break;
       }
     }
 
@@ -967,8 +1169,11 @@ function processGameTick(sessionId: string): void {
     }
   }
 
-  // Create state snapshot from actual game entities
-  const stateSnapshot: GameStateSnapshot = {
+  // Determine if this is a slow tick (for priority-based updates)
+  const isSlowTick = session.currentTick % 4 === 0; // Every 4th tick at 30Hz = 7.5Hz for low priority
+
+  // Create full state snapshot from actual game entities
+  const fullStateSnapshot: GameStateSnapshot = {
     tick: session.currentTick,
     timestamp: Date.now(),
     lastProcessedInput,
@@ -985,12 +1190,17 @@ function processGameTick(sessionId: string): void {
     roundActive: session.gameState === 'playing',
   };
 
-  session.stateSnapshot = stateSnapshot;
+  // Compute delta against last broadcast state
+  const deltaState = computeStateDelta(fullStateSnapshot, session.lastBroadcastState, isSlowTick);
 
-  // Broadcast state to all players
+  // Update last broadcast state
+  session.lastBroadcastState = fullStateSnapshot;
+  session.stateSnapshot = fullStateSnapshot;
+
+  // Broadcast delta state to all players
   io.to(sessionId).emit('game_state', {
     sessionId,
-    state: stateSnapshot,
+    state: deltaState,
   });
 }
 

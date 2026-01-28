@@ -119,6 +119,9 @@ export interface GameStateSnapshot {
   // Round info
   roundNumber: number;
   roundActive: boolean;
+  // Delta compression support
+  isDelta?: boolean; // True if this is a delta update
+  removedBullets?: string[]; // IDs of bullets that were removed
 }
 
 // ============================================================================

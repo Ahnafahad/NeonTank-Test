@@ -125,7 +125,7 @@ export function useMultiplayer() {
     }, [reset]);
 
     // Start matchmaking
-    const findMatch = useCallback(async () => {
+    const findMatch = useCallback(async (gameSettings?: { scoreLimitValue: number; timeLimitEnabled: boolean; timeLimitSeconds: number }) => {
         if (!networkManagerRef.current) return;
 
         try {
@@ -133,7 +133,7 @@ export function useMultiplayer() {
             setConnectionStatus('matchmaking');
             setQueuePosition(1);
 
-            const session = await networkManagerRef.current.findMatch();
+            const session = await networkManagerRef.current.findMatch(gameSettings);
             console.log('[useMultiplayer] Matchmaking result:', session);
             setSessionInfo(session.sessionId, networkManagerRef.current.getPlayerId());
 
