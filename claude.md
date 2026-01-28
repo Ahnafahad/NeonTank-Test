@@ -5,7 +5,8 @@
 **Neon Tank Duel** is a multiplayer tank battle game built with Next.js and Socket.IO. It features real-time multiplayer combat, AI opponents, customizable game settings, and a modern neon-themed visual style.
 
 ### Key Highlights
-- Real-time multiplayer with WebSocket connections (Socket.IO)
+- **LAN Multiplayer** - Zero-lag local network play with PeerJS (WebRTC)
+- **Online Multiplayer** - Real-time battles with WebSocket connections (Socket.IO)
 - Advanced AI opponents with pathfinding and aiming systems
 - Rich game mechanics: charging shots, ammo system, power-ups, hazards, bullet ricochets
 - Extensive customization: 30+ game settings including visual effects, gameplay mods, and accessibility options
@@ -14,21 +15,27 @@
 - Matchmaking system for online battles
 - Multiple map variants and weather effects
 
+### Deployment Architecture
+- **Frontend**: Deployed on **Vercel** (Free Hobby Tier)
+- **Backend (Online Mode)**: Deployed on **Render** (Free Web Service)
+- **LAN Mode**: Fully client-side, no backend required
+
 ---
 
 ## Tech Stack
 
 ### Frontend
-- **Next.js 16** (App Router)
+- **Next.js 16** (App Router) - Deployed on Vercel
 - **React 19**
 - **TypeScript 5**
 - **Tailwind CSS 4**
 - **Framer Motion** - Animations
 - **Zustand** - State management
 - **Howler.js** - Audio engine
+- **PeerJS** - WebRTC peer-to-peer for LAN multiplayer
 
 ### Backend
-- **Socket.IO 4** - Real-time bidirectional communication
+- **Socket.IO 4** - Real-time bidirectional communication (deployed on Render)
 - **Node.js HTTP Server**
 - **Redis Adapter** - For Socket.IO horizontal scaling (optional)
 
@@ -58,7 +65,11 @@ neon-tank-duel/
 │   ├── components/            # React components
 │   │   ├── GameCanvas.tsx     # Main canvas component
 │   │   ├── hud/               # HUD components (health, score, timer)
-│   │   ├── menus/             # Menu screens (main, options, game over, matchmaking)
+│   │   ├── menus/             # Menu screens
+│   │   │   ├── MainMenu.tsx   # Main menu with mode selection
+│   │   │   ├── LANLobby.tsx   # LAN host/join lobby
+│   │   │   ├── MatchmakingScreen.tsx # Online matchmaking
+│   │   │   └── ...            # Other menu screens
 │   │   ├── mobile/            # Mobile controls (joystick, shoot button)
 │   │   └── ui/                # Reusable UI components (button, modal, slider, toggle)
 │   │
@@ -71,16 +82,21 @@ neon-tank-duel/
 │   │   │   ├── TankAI.ts      # AI controller
 │   │   │   └── behaviors/     # AI behaviors (pathfinding, aiming)
 │   │   ├── map/               # Map generation and presets
-│   │   ├── multiplayer/       # Network manager for online play
+│   │   ├── multiplayer/       # Network managers
+│   │   │   ├── NetworkManager.ts    # Online multiplayer (Socket.IO)
+│   │   │   └── LANNetworkManager.ts # LAN multiplayer (PeerJS)
 │   │   └── utils/             # Utilities (constants, vector math)
 │   │
 │   ├── hooks/                 # React hooks
-│   │   ├── useMultiplayer.ts  # Multiplayer logic hook
+│   │   ├── useMultiplayer.ts  # Online multiplayer logic hook
+│   │   ├── useLANMultiplayer.ts # LAN multiplayer logic hook
 │   │   └── useResponsiveCanvas.ts # Canvas sizing
 │   │
 │   ├── lib/                   # Libraries
-│   │   └── socket/            # Socket.IO setup
-│   │       ├── server.ts      # Server-side socket handler
+│   │   └── socket/            # Socket.IO and PeerJS setup
+│   │       ├── server.ts      # Server-side socket handler (online mode)
+│   │       ├── localServer.ts # PeerJS host server (LAN mode)
+│   │       ├── localClient.ts # PeerJS guest client (LAN mode)
 │   │       ├── events.ts      # Event type definitions
 │   │       └── index.ts       # Client-side socket connection
 │   │
@@ -120,13 +136,25 @@ neon-tank-duel/
   - Cover-seeking when low on health
   - Strategic power-up collection
 
-### 3. Online Battle (Multiplayer)
+### 3. LAN Multiplayer
+- **Zero-lag local network play** optimized for same WiFi gameplay
+- WebRTC peer-to-peer connections via PeerJS
+- 6-digit room code system for easy game discovery
+- Host/guest architecture (one player hosts)
+- **Performance**: <5ms latency, 60 Hz tick rate, zero interpolation
+- No backend server required (fully client-side)
+- Real-time latency display and connection status
+- Automatic countdown when both players connect
+- **Deployment**: No Vercel/Render configuration needed
+
+### 4. Online Battle (Multiplayer)
 - Real-time networked gameplay via Socket.IO
 - Matchmaking system with room codes
 - Shareable invite links
 - Client-side prediction for smooth movement
 - Server reconciliation to prevent cheating
 - Interpolation for remote player rendering
+- **Deployment**: Requires Render backend server
 
 ---
 
@@ -387,11 +415,30 @@ npm start
 
 The game uses a **hybrid architecture** for free deployment:
 
-### Architecture
+### Architecture Overview
 - **Frontend (Next.js)**: Deployed on **Vercel** (Free Hobby Tier)
+  - Serves Local Multiplayer, AI Battle, and LAN Multiplayer modes
 - **Backend (Socket.IO)**: Deployed on **Render** (Free Web Service)
+  - **Only required for Online Battle mode**
+- **LAN Multiplayer**: No backend needed
+  - Uses PeerJS public signaling servers (free)
+  - WebRTC peer-to-peer connections
 
-### Step 1: Deploy Socket Server to Render
+### Game Mode Deployment Requirements
+
+| Game Mode | Vercel | Render | Additional Setup |
+|-----------|--------|--------|------------------|
+| Local 2-Player | ✅ Required | ❌ Not needed | None |
+| AI Battle | ✅ Required | ❌ Not needed | None |
+| **LAN Multiplayer** | ✅ Required | ❌ Not needed | **None** |
+| Online Battle | ✅ Required | ✅ Required | Socket.IO env vars |
+
+### ⚠️ Important: LAN Multiplayer Setup
+**No configuration needed!** LAN Multiplayer works out of the box with just the Vercel deployment. It uses PeerJS's free public signaling servers for initial WebRTC connection setup. The actual game data flows peer-to-peer directly between browsers.
+
+---
+
+### Step 1: Deploy Socket Server to Render (Online Mode Only)
 1. Create Web Service on Render
 2. Connect GitHub repository
 3. Configuration:
