@@ -55,45 +55,90 @@ export class LocalMultiplayerServer {
 
   async startHosting(): Promise<void> {
     return new Promise((resolve, reject) => {
+      // Timeout for server initialization
+      const initTimeout = setTimeout(() => {
+        console.error('[LAN Server] Server initialization timeout');
+        if (this.peer) {
+          this.peer.destroy();
+          this.peer = null;
+        }
+        reject(new Error('Failed to initialize server. Please try again.'));
+      }, 15000);
+
       try {
         // Create peer with room code as ID
         this.peer = new Peer(this.roomCode, {
+          debug: 2, // Enable debug logging
           config: {
             iceServers: [
               { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' }
+              { urls: 'stun:stun1.l.google.com:19302' },
+              { urls: 'stun:stun2.l.google.com:19302' },
+              { urls: 'stun:stun3.l.google.com:19302' },
+              { urls: 'stun:stun4.l.google.com:19302' }
             ]
           }
         });
 
         this.peer.on('open', (id) => {
-          console.log(`[LAN Server] Hosting with room code: ${id}`);
+          clearTimeout(initTimeout);
+          console.log(`[LAN Server] ✅ Successfully hosting with room code: ${id}`);
+          console.log(`[LAN Server] Share this code with your opponent: ${id}`);
           resolve();
         });
 
         this.peer.on('connection', (conn) => {
+          console.log(`[LAN Server] 🔗 Incoming connection from: ${conn.peer}`);
           this.handleGuestConnection(conn);
         });
 
         this.peer.on('error', (error) => {
+          clearTimeout(initTimeout);
           console.error('[LAN Server] Peer error:', error);
-          reject(error);
+
+          let errorMessage = 'Server error occurred';
+          if (error.type === 'unavailable-id') {
+            errorMessage = 'Room code already in use. Please try again.';
+            // Generate new room code
+            this.roomCode = this.generateRoomCode();
+          } else if (error.type === 'network') {
+            errorMessage = 'Network error. Please check your connection.';
+          } else if (error.type === 'server-error') {
+            errorMessage = 'PeerJS server error. Please try again later.';
+          }
+
+          reject(new Error(errorMessage));
         });
 
         this.peer.on('disconnected', () => {
-          console.log('[LAN Server] Peer disconnected');
+          console.log('[LAN Server] Peer disconnected from signaling server');
+          // Try to reconnect to signaling server
+          if (this.peer && !this.peer.destroyed) {
+            console.log('[LAN Server] Attempting to reconnect to signaling server...');
+            this.peer.reconnect();
+          }
         });
       } catch (error) {
+        clearTimeout(initTimeout);
         reject(error);
       }
     });
   }
 
   private handleGuestConnection(conn: DataConnection): void {
-    console.log(`[LAN Server] Guest connecting: ${conn.peer}`);
+    console.log(`[LAN Server] 👤 Guest attempting to connect: ${conn.peer}`);
+
+    // Set timeout for connection establishment
+    const connectionTimeout = setTimeout(() => {
+      if (!conn.open) {
+        console.error(`[LAN Server] ⏱️ Connection timeout for guest: ${conn.peer}`);
+        conn.close();
+      }
+    }, 15000);
 
     conn.on('open', () => {
-      console.log(`[LAN Server] Guest connected: ${conn.peer}`);
+      clearTimeout(connectionTimeout);
+      console.log(`[LAN Server] ✅ Guest successfully connected: ${conn.peer}`);
       this.connections.set(conn.peer, conn);
 
       // Send initialization message
@@ -116,7 +161,8 @@ export class LocalMultiplayerServer {
     });
 
     conn.on('close', () => {
-      console.log(`[LAN Server] Guest disconnected: ${conn.peer}`);
+      clearTimeout(connectionTimeout);
+      console.log(`[LAN Server] 👋 Guest disconnected: ${conn.peer}`);
       this.connections.delete(conn.peer);
       if (this.onGuestLeave) {
         this.onGuestLeave(conn.peer);
@@ -124,7 +170,9 @@ export class LocalMultiplayerServer {
     });
 
     conn.on('error', (error) => {
-      console.error(`[LAN Server] Connection error with ${conn.peer}:`, error);
+      clearTimeout(connectionTimeout);
+      console.error(`[LAN Server] ❌ Connection error with ${conn.peer}:`, error);
+      this.connections.delete(conn.peer);
     });
   }
 

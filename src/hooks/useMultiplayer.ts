@@ -114,7 +114,20 @@ export function useMultiplayer() {
             }
         } catch (err) {
             console.error('[useMultiplayer] Connection failed:', err);
-            setError('Failed to connect to server');
+
+            // Provide specific error messages
+            let errorMessage = 'Failed to connect to server';
+            if (err instanceof Error) {
+                if (err.message.includes('timeout')) {
+                    errorMessage = 'Connection timed out. Please check if the online server is running and try again.';
+                } else if (err.message.includes('ECONNREFUSED')) {
+                    errorMessage = 'Server is not available. Online mode requires a backend server (see deployment docs).';
+                } else {
+                    errorMessage = err.message;
+                }
+            }
+
+            setError(errorMessage);
         }
     }, [setSessionInfo, setError]);
 
@@ -151,7 +164,17 @@ export function useMultiplayer() {
             }
         } catch (err) {
             console.error('[useMultiplayer] Matchmaking failed:', err);
-            setError('Failed to find match');
+
+            let errorMessage = 'Failed to find match';
+            if (err instanceof Error) {
+                if (err.message.includes('timeout')) {
+                    errorMessage = 'Matchmaking timed out. The server may be unavailable.';
+                } else {
+                    errorMessage = err.message || 'Failed to find match';
+                }
+            }
+
+            setError(errorMessage);
         }
     }, [setConnectionStatus, setQueuePosition, setSessionInfo, setOpponent, setError]);
 

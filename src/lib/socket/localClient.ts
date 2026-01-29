@@ -16,46 +16,103 @@ export class LocalMultiplayerClient {
     this.roomCode = roomCode;
 
     return new Promise((resolve, reject) => {
+      // Set connection timeout
+      const connectionTimeout = setTimeout(() => {
+        console.error('[LAN Client] Connection timeout after 30 seconds');
+        if (this.peer) {
+          this.peer.destroy();
+          this.peer = null;
+        }
+        reject(new Error('Connection timeout. Make sure you are on the same network as the host.'));
+      }, 30000);
+
       try {
-        // Create peer client
+        // Create peer client with explicit configuration
         this.peer = new Peer({
+          debug: 2, // Enable debug logging
           config: {
             iceServers: [
               { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' }
+              { urls: 'stun:stun1.l.google.com:19302' },
+              { urls: 'stun:stun2.l.google.com:19302' },
+              { urls: 'stun:stun3.l.google.com:19302' },
+              { urls: 'stun:stun4.l.google.com:19302' }
             ]
           }
         });
 
         this.peer.on('open', (id) => {
           console.log(`[LAN Client] Peer initialized with ID: ${id}`);
+          console.log(`[LAN Client] Attempting to connect to host: ${roomCode}`);
 
           // Connect to host using room code
           this.connection = this.peer!.connect(roomCode, {
-            reliable: true
+            reliable: true,
+            serialization: 'json'
           });
 
-          this.setupConnection(resolve, reject);
+          if (!this.connection) {
+            clearTimeout(connectionTimeout);
+            reject(new Error('Failed to create connection to host'));
+            return;
+          }
+
+          this.setupConnection(resolve, reject, connectionTimeout);
         });
 
         this.peer.on('error', (error) => {
+          clearTimeout(connectionTimeout);
           console.error('[LAN Client] Peer error:', error);
-          if (this.onError) {
-            this.onError(error as Error);
+
+          let errorMessage = 'Failed to connect to host';
+          if (error.type === 'peer-unavailable') {
+            errorMessage = 'Host not found. Please check the room code.';
+          } else if (error.type === 'network') {
+            errorMessage = 'Network error. Please check your connection.';
+          } else if (error.type === 'server-error') {
+            errorMessage = 'PeerJS server error. Please try again later.';
           }
-          reject(error);
+
+          if (this.onError) {
+            this.onError(new Error(errorMessage));
+          }
+          reject(new Error(errorMessage));
+        });
+
+        this.peer.on('disconnected', () => {
+          console.log('[LAN Client] Peer disconnected from signaling server');
+          // Try to reconnect to signaling server
+          if (this.peer && !this.peer.destroyed) {
+            console.log('[LAN Client] Attempting to reconnect to signaling server...');
+            this.peer.reconnect();
+          }
         });
       } catch (error) {
+        clearTimeout(connectionTimeout);
         reject(error);
       }
     });
   }
 
-  private setupConnection(resolve: () => void, reject: (error: any) => void): void {
-    if (!this.connection) return;
+  private setupConnection(resolve: () => void, reject: (error: any) => void, timeoutId: NodeJS.Timeout): void {
+    if (!this.connection) {
+      clearTimeout(timeoutId);
+      reject(new Error('Connection object not initialized'));
+      return;
+    }
+
+    // Add timeout for the connection establishment
+    const connectionEstablishTimeout = setTimeout(() => {
+      console.error('[LAN Client] Connection establishment timeout');
+      if (this.connection && this.connection.open === false) {
+        reject(new Error('Failed to establish connection to host. Please try again.'));
+      }
+    }, 15000); // 15 second timeout for connection to open
 
     this.connection.on('open', () => {
-      console.log(`[LAN Client] Connected to host: ${this.roomCode}`);
+      clearTimeout(timeoutId);
+      clearTimeout(connectionEstablishTimeout);
+      console.log(`[LAN Client] ✅ Successfully connected to host: ${this.roomCode}`);
 
       if (this.onConnected) {
         this.onConnected();
@@ -72,6 +129,7 @@ export class LocalMultiplayerClient {
     });
 
     this.connection.on('close', () => {
+      clearTimeout(connectionEstablishTimeout);
       console.log('[LAN Client] Connection closed');
       if (this.onDisconnected) {
         this.onDisconnected();
@@ -79,11 +137,15 @@ export class LocalMultiplayerClient {
     });
 
     this.connection.on('error', (error) => {
+      clearTimeout(timeoutId);
+      clearTimeout(connectionEstablishTimeout);
       console.error('[LAN Client] Connection error:', error);
+
+      const errorMessage = 'Connection failed. Please check your network and try again.';
       if (this.onError) {
-        this.onError(error as Error);
+        this.onError(new Error(errorMessage));
       }
-      reject(error);
+      reject(new Error(errorMessage));
     });
   }
 
