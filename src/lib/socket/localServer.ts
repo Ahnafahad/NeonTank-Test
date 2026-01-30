@@ -69,6 +69,9 @@ export class LocalMultiplayerServer {
       }, 30000); // Increased from 15s to 30s
 
       try {
+        console.log('[LAN Server] 🚀 Initializing PeerJS host...');
+        console.log('[LAN Server] Room code (Peer ID):', this.roomCode);
+
         // Create peer with room code as ID
         this.peer = new Peer(this.roomCode, {
           debug: 2, // Enable debug logging
@@ -82,6 +85,8 @@ export class LocalMultiplayerServer {
             ]
           }
         });
+
+        console.log('[LAN Server] ✓ PeerJS host created, connecting to signaling server...');
 
         this.peer.on('open', (id) => {
           clearTimeout(initTimeout);
@@ -129,12 +134,28 @@ export class LocalMultiplayerServer {
   }
 
   private handleGuestConnection(conn: DataConnection): void {
+    console.log(`[LAN Server] 👤 Guest attempting to connect: ${conn.peer}`);
+    console.log(`[LAN Server] Connection open status:`, conn.open);
     Logger.debug(`[LAN Server] 👤 Guest attempting to connect: ${conn.peer}`);
+
+    // Monitor ICE connection state if available
+    if (conn.peerConnection) {
+      const pc = conn.peerConnection;
+      console.log('[LAN Server] 🔍 Initial ICE connection state:', pc.iceConnectionState);
+
+      pc.addEventListener('iceconnectionstatechange', () => {
+        console.log('[LAN Server] 🔄 ICE connection state changed:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+          console.error('[LAN Server] ❌ ICE connection failed:', pc.iceConnectionState);
+        }
+      });
+    }
 
     // Set timeout for connection establishment (increased for WebRTC NAT traversal)
     const connectionTimeout = setTimeout(() => {
       if (!conn.open) {
         console.error(`[LAN Server] ⏱️ Connection timeout for guest: ${conn.peer} - WebRTC handshake failed`);
+        console.error(`[LAN Server] Final ICE state:`, conn.peerConnection?.iceConnectionState);
         conn.close();
       }
     }, 45000); // Increased from 15s to 45s to match client timeout

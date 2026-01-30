@@ -30,6 +30,9 @@ export class LocalMultiplayerClient {
       }, 60000); // Increased from 30s to 60s
 
       try {
+        console.log('[LAN Client] 🚀 Initializing PeerJS client...');
+        console.log('[LAN Client] Target room code:', roomCode);
+
         // Create peer client with explicit configuration
         this.peer = new Peer({
           debug: 2, // Enable debug logging
@@ -44,6 +47,8 @@ export class LocalMultiplayerClient {
           }
         });
 
+        console.log('[LAN Client] ✓ PeerJS client created, waiting for signaling server connection...');
+
         this.peer.on('open', (id) => {
           Logger.debug(`[LAN Client] Peer initialized with ID: ${id}`);
           Logger.debug(`[LAN Client] Attempting to connect to host: ${roomCode}`);
@@ -55,7 +60,17 @@ export class LocalMultiplayerClient {
             serialization: 'json'
           });
 
-          Logger.debug('[LAN Client] Connection object created, waiting for WebRTC handshake...');
+          if (!this.connection) {
+            clearTimeout(connectionTimeout);
+            console.error('[LAN Client] ❌ Failed to create connection object');
+            reject(new Error('Failed to initiate connection. Invalid room code?'));
+            return;
+          }
+
+          console.log('[LAN Client] ✓ Connection object created');
+          console.log('[LAN Client] ⏳ Waiting for WebRTC handshake...');
+          console.log('[LAN Client] Status: connection.open =', this.connection.open);
+          console.log('[LAN Client] Status: connection.peerConnection =', !!this.connection.peerConnection);
 
           if (!this.connection) {
             clearTimeout(connectionTimeout);
@@ -115,9 +130,35 @@ export class LocalMultiplayerClient {
       }
     }, 45000); // Increased from 15s to 45s for slow NAT traversal
 
+    // Monitor ICE connection state if available
+    if (this.connection.peerConnection) {
+      const pc = this.connection.peerConnection;
+      console.log('[LAN Client] 🔍 Initial ICE connection state:', pc.iceConnectionState);
+
+      pc.addEventListener('iceconnectionstatechange', () => {
+        console.log('[LAN Client] 🔄 ICE connection state changed:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+          console.error('[LAN Client] ❌ ICE connection failed:', pc.iceConnectionState);
+        }
+      });
+
+      pc.addEventListener('icegatheringstatechange', () => {
+        console.log('[LAN Client] 🔄 ICE gathering state:', pc.iceGatheringState);
+      });
+
+      pc.addEventListener('icecandidate', (event) => {
+        if (event.candidate) {
+          console.log('[LAN Client] 🧊 ICE candidate found:', event.candidate.type);
+        } else {
+          console.log('[LAN Client] ✅ ICE candidate gathering complete');
+        }
+      });
+    }
+
     this.connection.on('open', () => {
       clearTimeout(timeoutId);
       clearTimeout(connectionEstablishTimeout);
+      console.log(`[LAN Client] ✅ Successfully connected to host: ${this.roomCode}`);
       Logger.debug(`[LAN Client] ✅ Successfully connected to host: ${this.roomCode}`);
 
       if (this.onConnected) {
