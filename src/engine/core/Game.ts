@@ -361,7 +361,7 @@ export class Game {
           p1: scores.p1,
           p2: scores.p2
         };
-        Logger.debug(`[Game] Round ${round} over, winner: ${winner}, scores: p1=${this.scores.p1}, p2=${this.scores.p2}`);
+        console.log(`[Game] Round ${round} over, winner: ${winner}, scores: p1=${this.scores.p1}, p2=${this.scores.p2}`);
       },
       onRoundStart: (roundNumber) => {
         this.roundWinner = null;
@@ -548,7 +548,7 @@ export class Game {
         } else {
           // Create new crate with server's ID
           newCratesCreated++;
-          Logger.debug(`[Game] Creating NEW crate with ID: ${wallData.id} at (${wallData.x}, ${wallData.y})`);
+          console.log(`[Game] Creating NEW crate with ID: ${wallData.id} at (${wallData.x}, ${wallData.y})`);
           crate = new Wall(wallData.x, wallData.y, wallData.w, wallData.h, true, wallData.id);
           if (wallData.health !== undefined) {
             crate.health = wallData.health;
@@ -559,9 +559,9 @@ export class Game {
     }
 
     if (newCratesCreated > 0) {
-      Logger.debug(`[Game] ⚠️ Created ${newCratesCreated} NEW crates this frame (should only happen once!)`);
-      Logger.debug(`[Game] Existing crates IDs: ${Array.from(existingCrates.keys()).join(', ')}`);
-      Logger.debug(`[Game] Server crate IDs: ${mergedState.walls.filter(w => w.destructible).map(w => w.id).join(', ')}`);
+      console.warn(`[Game] ⚠️ Created ${newCratesCreated} NEW crates this frame (should only happen once!)`);
+      console.log(`[Game] Existing crates IDs: ${Array.from(existingCrates.keys()).join(', ')}`);
+      console.log(`[Game] Server crate IDs: ${mergedState.walls.filter(w => w.destructible).map(w => w.id).join(', ')}`);
     }
 
     this.crates = updatedCrates;
@@ -573,7 +573,10 @@ export class Game {
         p1: mergedState.scores.p1,
         p2: mergedState.scores.p2
       };
-      Logger.debug(`[Game] Updated scores from server: p1=${this.scores.p1}, p2=${this.scores.p2}`);
+      // Only log when scores actually change
+      if (this.scores.p1 > 0 || this.scores.p2 > 0) {
+        console.log(`[Game] Updated scores from server: p1=${this.scores.p1}, p2=${this.scores.p2}`);
+      }
     }
 
     // Apply sudden death state
