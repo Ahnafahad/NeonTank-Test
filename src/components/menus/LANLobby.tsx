@@ -17,17 +17,27 @@ export const LANLobby: React.FC<LANLobbyProps> = ({ onBack, onGameStart }) => {
   const countdownIntervalRef = useRef<number | null>(null);
   const hasCalledReadyRef = useRef<boolean>(false);
 
-  // Call readyUp after onGameStart callback is registered
+  // Call readyUp ONLY for guest after connecting, or for host after guest joins
   useEffect(() => {
     if (state.status === 'connected' && !hasCalledReadyRef.current) {
-      Logger.debug('[LANLobby] Connection established and callback ready, calling readyUp()');
-      hasCalledReadyRef.current = true;
-      // Small delay to ensure everything is set up
-      setTimeout(() => {
-        readyUp();
-      }, 100);
+      // Guest: Call readyUp immediately after connecting to host
+      if (state.role === 'guest') {
+        Logger.debug('[LANLobby] Guest connected, calling readyUp()');
+        hasCalledReadyRef.current = true;
+        setTimeout(() => {
+          readyUp();
+        }, 100);
+      }
+      // Host: Call readyUp only after guest joins (guestId will be set)
+      else if (state.role === 'host' && state.guestId) {
+        Logger.debug('[LANLobby] Host detected guest joined, calling readyUp()');
+        hasCalledReadyRef.current = true;
+        setTimeout(() => {
+          readyUp();
+        }, 100);
+      }
     }
-  }, [state.status, readyUp]);
+  }, [state.status, state.role, state.guestId, readyUp]);
 
   // Handle countdown when both players ready
   useEffect(() => {

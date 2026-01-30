@@ -13,6 +13,7 @@ export interface LANMultiplayerState {
   error: string | null;
   latency: number;
   isReady: boolean;
+  guestId: string | null;
 }
 
 export function useLANMultiplayer() {
@@ -22,7 +23,8 @@ export function useLANMultiplayer() {
     roomCode: '',
     error: null,
     latency: 0,
-    isReady: false
+    isReady: false,
+    guestId: null
   });
 
   const serverRef = useRef<LocalMultiplayerServer | null>(null);
@@ -55,6 +57,10 @@ export function useLANMultiplayer() {
       // Set up callbacks
       server.onGuestJoined((guestId) => {
         Logger.debug(`Guest joined: ${guestId}`);
+        setState(prev => ({
+          ...prev,
+          guestId
+        }));
         // Don't set isReady yet - wait for explicit ready signal
       });
 
@@ -62,7 +68,8 @@ export function useLANMultiplayer() {
         Logger.debug(`Guest left: ${guestId}`);
         setState(prev => ({
           ...prev,
-          isReady: false
+          isReady: false,
+          guestId: null
         }));
       });
 
@@ -202,7 +209,8 @@ export function useLANMultiplayer() {
       roomCode: '',
       error: null,
       latency: 0,
-      isReady: false
+      isReady: false,
+      guestId: null
     });
   }, []);
 

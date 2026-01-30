@@ -800,16 +800,27 @@ export class Game {
     const serverTickRate = this.lastServerState?.tickRate || 60;
     const tickPeriod = 1000 / serverTickRate; // Time per tick in ms
 
-    // Calculate target delay: 2x tick period + 2x jitter for safety
-    // This is more aggressive than before (was 3x jitter) for Valorant-level responsiveness
-    const targetDelay = Math.min(
-      this.MAX_INTERPOLATION_DELAY,
-      Math.max(this.MIN_INTERPOLATION_DELAY, tickPeriod * 2 + avgJitter * 2)
-    );
+    // ADAPTIVE INTERPOLATION STRATEGY (Valorant-inspired):
+    // Good network (low jitter < 5ms): ZERO interpolation - instant state application
+    // Decent network (5-15ms jitter): Minimal interpolation - half a tick
+    // Bad network (>15ms jitter): Full interpolation + extrapolation
 
-    // Smooth adjustment with 10% alpha filter
-    const alpha = 0.1;
-    this.interpolationDelay = this.interpolationDelay * (1 - alpha) + targetDelay * alpha;
+    if (avgJitter < 5) {
+      // Perfect network - instant apply like Valorant
+      this.interpolationDelay = 0;
+    } else if (avgJitter < 15) {
+      // Slight jitter - minimal buffer (half a tick for safety)
+      this.interpolationDelay = tickPeriod * 0.5;
+    } else {
+      // High jitter - use adaptive buffer
+      const targetDelay = Math.min(
+        this.MAX_INTERPOLATION_DELAY,
+        Math.max(this.MIN_INTERPOLATION_DELAY, tickPeriod * 1.5 + avgJitter)
+      );
+      // Smooth transition
+      const alpha = 0.1;
+      this.interpolationDelay = this.interpolationDelay * (1 - alpha) + targetDelay * alpha;
+    }
   }
 
   private updateRemotePlayerInterpolation(serverState: GameStateSnapshot): void {

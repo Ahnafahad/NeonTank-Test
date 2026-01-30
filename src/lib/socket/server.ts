@@ -643,7 +643,7 @@ function serializeBullet(bullet: Bullet): SerializedBullet {
 
 function serializePowerUp(powerup: PowerUp): SerializedPowerUp {
   return {
-    id: `powerup-${powerup.pos.x}-${powerup.pos.y}`,
+    id: powerup.id, // Use entity's actual ID instead of generating new one
     x: powerup.pos.x,
     y: powerup.pos.y,
     type: powerup.type,
@@ -653,7 +653,7 @@ function serializePowerUp(powerup: PowerUp): SerializedPowerUp {
 
 function serializeWall(wall: Wall, index: number): SerializedWall {
   return {
-    id: `wall-${index}`,
+    id: wall.id, // Use entity's actual ID instead of generating new one
     x: wall.x,
     y: wall.y,
     w: wall.w,
