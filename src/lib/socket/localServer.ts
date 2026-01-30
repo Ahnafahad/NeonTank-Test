@@ -58,15 +58,15 @@ export class LocalMultiplayerServer {
 
   async startHosting(): Promise<void> {
     return new Promise((resolve, reject) => {
-      // Timeout for server initialization
+      // Timeout for server initialization (increased for WebRTC signaling)
       const initTimeout = setTimeout(() => {
         console.error('[LAN Server] Server initialization timeout');
         if (this.peer) {
           this.peer.destroy();
           this.peer = null;
         }
-        reject(new Error('Failed to initialize server. Please try again.'));
-      }, 15000);
+        reject(new Error('Failed to initialize server. Please check your network and try again.'));
+      }, 30000); // Increased from 15s to 30s
 
       try {
         // Create peer with room code as ID
@@ -131,13 +131,13 @@ export class LocalMultiplayerServer {
   private handleGuestConnection(conn: DataConnection): void {
     Logger.debug(`[LAN Server] 👤 Guest attempting to connect: ${conn.peer}`);
 
-    // Set timeout for connection establishment
+    // Set timeout for connection establishment (increased for WebRTC NAT traversal)
     const connectionTimeout = setTimeout(() => {
       if (!conn.open) {
-        console.error(`[LAN Server] ⏱️ Connection timeout for guest: ${conn.peer}`);
+        console.error(`[LAN Server] ⏱️ Connection timeout for guest: ${conn.peer} - WebRTC handshake failed`);
         conn.close();
       }
-    }, 15000);
+    }, 45000); // Increased from 15s to 45s to match client timeout
 
     conn.on('open', () => {
       clearTimeout(connectionTimeout);

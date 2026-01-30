@@ -19,15 +19,15 @@ export class LocalMultiplayerClient {
     this.roomCode = roomCode;
 
     return new Promise((resolve, reject) => {
-      // Set connection timeout
+      // Set connection timeout (increased for slow NAT traversal)
       const connectionTimeout = setTimeout(() => {
-        console.error('[LAN Client] Connection timeout after 30 seconds');
+        console.error('[LAN Client] Connection timeout after 60 seconds');
         if (this.peer) {
           this.peer.destroy();
           this.peer = null;
         }
-        reject(new Error('Connection timeout. Make sure you are on the same network as the host.'));
-      }, 30000);
+        reject(new Error('Connection timeout. Possible causes:\n• Not on same WiFi network\n• Firewall blocking connection\n• Host disconnected'));
+      }, 60000); // Increased from 30s to 60s
 
       try {
         // Create peer client with explicit configuration
@@ -47,12 +47,15 @@ export class LocalMultiplayerClient {
         this.peer.on('open', (id) => {
           Logger.debug(`[LAN Client] Peer initialized with ID: ${id}`);
           Logger.debug(`[LAN Client] Attempting to connect to host: ${roomCode}`);
+          console.log(`[LAN Client] Starting WebRTC connection... (this may take 15-45 seconds)`);
 
           // Connect to host using room code
           this.connection = this.peer!.connect(roomCode, {
             reliable: true,
             serialization: 'json'
           });
+
+          Logger.debug('[LAN Client] Connection object created, waiting for WebRTC handshake...');
 
           if (!this.connection) {
             clearTimeout(connectionTimeout);
@@ -104,13 +107,13 @@ export class LocalMultiplayerClient {
       return;
     }
 
-    // Add timeout for the connection establishment
+    // Add timeout for the connection establishment (increased for WebRTC NAT traversal)
     const connectionEstablishTimeout = setTimeout(() => {
-      console.error('[LAN Client] Connection establishment timeout');
+      console.error('[LAN Client] Connection establishment timeout - WebRTC failed to connect');
       if (this.connection && this.connection.open === false) {
-        reject(new Error('Failed to establish connection to host. Please try again.'));
+        reject(new Error('WebRTC connection failed. Try:\n• Ensure both devices are on same WiFi\n• Disable VPN if enabled\n• Check firewall settings'));
       }
-    }, 15000); // 15 second timeout for connection to open
+    }, 45000); // Increased from 15s to 45s for slow NAT traversal
 
     this.connection.on('open', () => {
       clearTimeout(timeoutId);
