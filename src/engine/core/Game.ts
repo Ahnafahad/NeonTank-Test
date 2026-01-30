@@ -356,7 +356,12 @@ export class Game {
       },
       onRoundOver: (round, winner, scores) => {
         this.roundWinner = winner;
-        this.scores = scores;
+        // Force new object reference for React state comparison
+        this.scores = {
+          p1: scores.p1,
+          p2: scores.p2
+        };
+        Logger.debug(`[Game] Round ${round} over, winner: ${winner}, scores: p1=${this.scores.p1}, p2=${this.scores.p2}`);
       },
       onRoundStart: (roundNumber) => {
         this.roundWinner = null;
@@ -519,9 +524,8 @@ export class Game {
           // Update existing powerup (position shouldn't change, but update type if needed)
           powerup.type = powerupData.type;
         } else {
-          // Create new powerup
-          powerup = new PowerUp(powerupData.x, powerupData.y, powerupData.type);
-          powerup.id = powerupData.id; // Sync ID
+          // Create new powerup with server's ID
+          powerup = new PowerUp(powerupData.x, powerupData.y, powerupData.type, powerupData.id);
         }
         return powerup;
       });
@@ -541,9 +545,8 @@ export class Game {
             crate.health = wallData.health;
           }
         } else {
-          // Create new crate
-          crate = new Wall(wallData.x, wallData.y, wallData.w, wallData.h, true);
-          crate.id = wallData.id; // Sync ID
+          // Create new crate with server's ID
+          crate = new Wall(wallData.x, wallData.y, wallData.w, wallData.h, true, wallData.id);
           if (wallData.health !== undefined) {
             crate.health = wallData.health;
           }
@@ -553,8 +556,15 @@ export class Game {
     }
     this.crates = updatedCrates;
 
-    // Apply scores
-    this.scores = mergedState.scores;
+    // Apply scores - create new object to ensure React detects change
+    if (mergedState.scores) {
+      // Force new object reference for React state comparison
+      this.scores = {
+        p1: mergedState.scores.p1,
+        p2: mergedState.scores.p2
+      };
+      Logger.debug(`[Game] Updated scores from server: p1=${this.scores.p1}, p2=${this.scores.p2}`);
+    }
 
     // Apply sudden death state
     this.suddenDeathActive = mergedState.suddenDeath;

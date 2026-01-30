@@ -12,13 +12,14 @@ export class PowerUp {
   public active: boolean;
   public id: string;
 
-  constructor(x: number, y: number, type: PowerUpType) {
+  constructor(x: number, y: number, type: PowerUpType, id?: string) {
     this.pos = new Vector(x, y);
     this.type = type;
     this.radius = Constants.POWERUP_RADIUS;
     this.pulse = Math.random() * Math.PI;
     this.active = true;
-    this.id = `powerup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Use provided ID if given (from server), otherwise generate new one
+    this.id = id || `powerup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   update(): void {

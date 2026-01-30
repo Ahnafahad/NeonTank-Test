@@ -86,7 +86,7 @@ function GameContent() {
     if (gameRef.current && gameRef.current.state === 'playing') {
       // Get scores from game engine (works for all modes including online)
       const currentScores = gameRef.current.getScores();
-      setDisplayScores(currentScores);
+      setDisplayScores({ ...currentScores }); // Force new object for React comparison
 
       updateStats({
         p1Health: gameRef.current.getP1Health(),
