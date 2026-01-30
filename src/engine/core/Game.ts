@@ -302,6 +302,7 @@ export class Game {
   }
 
   private createMap(): void {
+    console.log('[Game] createMap() called, mode:', this.mode);
     this.walls = [];
     this.crates = [];
     this.hazards = [];
@@ -420,6 +421,9 @@ export class Game {
   }
 
   private applyNonPlayerGameState(state: GameStateSnapshot): void {
+    // Debug: Check crates array status at function entry
+    console.log(`[Game] applyNonPlayerGameState START: this.crates.length = ${this.crates.length}, crates = [${this.crates.map(c => c.id).join(', ')}]`);
+
     // Merge delta state with last full state
     const mergedState = this.mergeDeltaState(state, this.lastServerState);
 
@@ -572,6 +576,9 @@ export class Game {
     }
 
     this.crates = updatedCrates;
+
+    // Debug: Check crates array status at function exit
+    console.log(`[Game] applyNonPlayerGameState END: this.crates.length = ${this.crates.length}, crates = [${this.crates.map(c => c.id).join(', ')}]`);
 
     // Apply scores - create new object to ensure React detects change
     if (mergedState.scores) {
