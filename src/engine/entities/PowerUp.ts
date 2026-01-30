@@ -10,6 +10,7 @@ export class PowerUp {
   public radius: number;
   public pulse: number;
   public active: boolean;
+  public id: string;
 
   constructor(x: number, y: number, type: PowerUpType) {
     this.pos = new Vector(x, y);
@@ -17,6 +18,7 @@ export class PowerUp {
     this.radius = Constants.POWERUP_RADIUS;
     this.pulse = Math.random() * Math.PI;
     this.active = true;
+    this.id = `powerup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   update(): void {

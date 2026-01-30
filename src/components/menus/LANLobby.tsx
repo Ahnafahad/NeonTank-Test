@@ -1,3 +1,4 @@
+import { Logger } from '@/lib/logging/Logger';
 import React, { useState, useEffect, useRef } from 'react';
 import { useLANMultiplayer } from '../../hooks/useLANMultiplayer';
 
@@ -12,8 +13,21 @@ export const LANLobby: React.FC<LANLobbyProps> = ({ onBack, onGameStart }) => {
   const [mode, setMode] = useState<LobbyMode>('select');
   const [inputCode, setInputCode] = useState('');
   const [countdown, setCountdown] = useState<number | null>(null);
-  const { state, startHosting, joinGame, disconnect, getServer, getClient } = useLANMultiplayer();
+  const { state, startHosting, joinGame, disconnect, getServer, getClient, readyUp } = useLANMultiplayer();
   const countdownIntervalRef = useRef<number | null>(null);
+  const hasCalledReadyRef = useRef<boolean>(false);
+
+  // Call readyUp after onGameStart callback is registered
+  useEffect(() => {
+    if (state.status === 'connected' && !hasCalledReadyRef.current) {
+      Logger.debug('[LANLobby] Connection established and callback ready, calling readyUp()');
+      hasCalledReadyRef.current = true;
+      // Small delay to ensure everything is set up
+      setTimeout(() => {
+        readyUp();
+      }, 100);
+    }
+  }, [state.status, readyUp]);
 
   // Handle countdown when both players ready
   useEffect(() => {

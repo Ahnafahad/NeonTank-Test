@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Toggle, Slider, Select } from '@/components/ui';
-import { useSettingsStore } from '@/stores/useSettingsStore';
+import { useSettingsStore } from '@/store/useSettingsStore';
 
 interface OptionsMenuProps {
   onBack: () => void;
@@ -86,67 +86,65 @@ export function OptionsMenu({ onBack }: OptionsMenuProps) {
             <div className="space-y-4">
               <Toggle
                 label="Charging Enabled"
-                value={settings.gameplay.chargingEnabled}
-                onChange={(v) => settings.setGameplaySetting('chargingEnabled', v)}
+                value={settings.charging}
+                onChange={(v) => settings.updateSetting('charging', v)}
               />
-              <Slider
-                label="Ammo Limit"
-                min={0}
-                max={20}
-                value={settings.gameplay.ammoLimit}
-                onChange={(v) => settings.setGameplaySetting('ammoLimit', v)}
-                valueFormatter={(v) => (v === 0 ? 'Unlimited' : v.toString())}
+              <Toggle
+                label="Ammo System"
+                value={settings.ammoSystem}
+                onChange={(v) => settings.updateSetting('ammoSystem', v)}
+              />
+              <Toggle
+                label="Unlimited Ammo"
+                value={settings.unlimitedAmmo}
+                onChange={(v) => settings.updateSetting('unlimitedAmmo', v)}
+                disabled={!settings.ammoSystem}
               />
               <Toggle
                 label="Friendly Fire"
-                value={settings.gameplay.friendlyFire}
-                onChange={(v) => settings.setGameplaySetting('friendlyFire', v)}
+                value={settings.friendlyFire}
+                onChange={(v) => settings.updateSetting('friendlyFire', v)}
               />
               <Slider
-                label="Tank Speed"
-                min={1}
-                max={10}
-                value={settings.gameplay.tankSpeed}
-                onChange={(v) => settings.setGameplaySetting('tankSpeed', v)}
-              />
-              <Slider
-                label="Max Health"
-                min={1}
-                max={5}
-                value={settings.gameplay.maxHealth}
-                onChange={(v) => settings.setGameplaySetting('maxHealth', v)}
+                label="Starting Health"
+                min={50}
+                max={200}
+                step={10}
+                value={settings.startingHealth}
+                onChange={(v) => settings.updateSetting('startingHealth', v)}
+                valueFormatter={(v) => `${v} HP`}
               />
               <Toggle
                 label="Bullet Ricochet"
-                value={settings.gameplay.bulletRicochet}
-                onChange={(v) => settings.setGameplaySetting('bulletRicochet', v)}
+                value={settings.bulletRicochet}
+                onChange={(v) => settings.updateSetting('bulletRicochet', v)}
               />
               <Toggle
                 label="Recoil"
-                value={settings.gameplay.recoil}
-                onChange={(v) => settings.setGameplaySetting('recoil', v)}
+                value={settings.recoil}
+                onChange={(v) => settings.updateSetting('recoil', v)}
               />
               <Slider
                 label="Game Speed"
                 min={0.5}
                 max={2.0}
                 step={0.1}
-                value={settings.gameplay.gameSpeed}
-                onChange={(v) => settings.setGameplaySetting('gameSpeed', v)}
+                value={settings.gameSpeed}
+                onChange={(v) => settings.updateSetting('gameSpeed', v)}
                 valueFormatter={(v) => `${v.toFixed(1)}x`}
               />
               <Toggle
                 label="Low Gravity"
-                value={settings.gameplay.lowGravity}
-                onChange={(v) => settings.setGameplaySetting('lowGravity', v)}
+                value={settings.lowGravity}
+                onChange={(v) => settings.updateSetting('lowGravity', v)}
               />
               <Slider
                 label="Max Bounces"
                 min={0}
                 max={5}
                 step={1}
-                value={settings.gameplay.maxBounces}
-                onChange={(v) => settings.setGameplaySetting('maxBounces', v)}
+                value={settings.maxBounces}
+                onChange={(v) => settings.updateSetting('maxBounces', v)}
               />
             </div>
           </CollapsibleSection>
@@ -159,19 +157,19 @@ export function OptionsMenu({ onBack }: OptionsMenuProps) {
           >
             <div className="space-y-4">
               <Toggle
-                label="Particles"
-                value={settings.graphics.particlesEnabled}
-                onChange={(v) => settings.setGraphicsSetting('particlesEnabled', v)}
+                label="Particle Effects"
+                value={settings.particleEffects}
+                onChange={(v) => settings.updateSetting('particleEffects', v)}
               />
               <Toggle
                 label="Bullet Trails"
-                value={settings.graphics.bulletTrails}
-                onChange={(v) => settings.setGraphicsSetting('bulletTrails', v)}
+                value={settings.bulletTrails}
+                onChange={(v) => settings.updateSetting('bulletTrails', v)}
               />
               <Toggle
                 label="Screen Shake"
-                value={settings.graphics.screenShakeEnabled}
-                onChange={(v) => settings.setGraphicsSetting('screenShakeEnabled', v)}
+                value={settings.screenShake}
+                onChange={(v) => settings.updateSetting('screenShake', v)}
               />
               <Select
                 label="Weather"
@@ -181,8 +179,8 @@ export function OptionsMenu({ onBack }: OptionsMenuProps) {
                   { value: 'snow', label: 'Snow' },
                   { value: 'fog', label: 'Fog' },
                 ]}
-                value={settings.graphics.weather}
-                onChange={(v) => settings.setGraphicsSetting('weather', v as typeof settings.graphics.weather)}
+                value={settings.weather}
+                onChange={(v) => settings.updateSetting('weather', v as typeof settings.weather)}
               />
               <Select
                 label="Colorblind Mode"
@@ -192,38 +190,39 @@ export function OptionsMenu({ onBack }: OptionsMenuProps) {
                   { value: 'deuteranopia', label: 'Deuteranopia' },
                   { value: 'tritanopia', label: 'Tritanopia' },
                 ]}
-                value={settings.graphics.colorblindMode}
-                onChange={(v) => settings.setGraphicsSetting('colorblindMode', v as typeof settings.graphics.colorblindMode)}
+                value={settings.colorblindMode}
+                onChange={(v) => settings.updateSetting('colorblindMode', v as typeof settings.colorblindMode)}
               />
               <Slider
                 label="Trail Length"
                 min={1}
                 max={10}
-                value={settings.graphics.bulletTrailLength}
-                onChange={(v) => settings.setGraphicsSetting('bulletTrailLength', v)}
+                value={settings.bulletTrailLength}
+                onChange={(v) => settings.updateSetting('bulletTrailLength', v)}
+                disabled={!settings.bulletTrails}
               />
               <Slider
                 label="Shake Intensity"
                 min={0}
                 max={100}
-                value={settings.graphics.screenShakeIntensity}
-                onChange={(v) => settings.setGraphicsSetting('screenShakeIntensity', v)}
-                disabled={!settings.graphics.screenShakeEnabled}
+                value={settings.screenShakeIntensity}
+                onChange={(v) => settings.updateSetting('screenShakeIntensity', v)}
+                disabled={!settings.screenShake}
                 valueFormatter={(v) => `${v}%`}
               />
               <Slider
                 label="Particle Density"
                 min={10}
                 max={200}
-                value={settings.graphics.particleDensity}
-                onChange={(v) => settings.setGraphicsSetting('particleDensity', v)}
-                disabled={!settings.graphics.particlesEnabled}
+                value={settings.particleDensity}
+                onChange={(v) => settings.updateSetting('particleDensity', v)}
+                disabled={!settings.particleEffects}
                 valueFormatter={(v) => `${v}%`}
               />
               <Toggle
                 label="Damage Numbers"
-                value={settings.graphics.damageNumbers}
-                onChange={(v) => settings.setGraphicsSetting('damageNumbers', v)}
+                value={settings.damageNumbers}
+                onChange={(v) => settings.updateSetting('damageNumbers', v)}
               />
             </div>
           </CollapsibleSection>
@@ -244,36 +243,36 @@ export function OptionsMenu({ onBack }: OptionsMenuProps) {
                   { value: 'fortress', label: 'Fortress' },
                   { value: 'random', label: 'Random' },
                 ]}
-                value={settings.map.variant}
-                onChange={(v) => settings.setMapSetting('variant', v as typeof settings.map.variant)}
+                value={settings.mapVariant}
+                onChange={(v) => settings.updateSetting('mapVariant', v as typeof settings.mapVariant)}
               />
               <Toggle
                 label="Destructible Crates"
-                value={settings.map.destructibleCrates}
-                onChange={(v) => settings.setMapSetting('destructibleCrates', v)}
+                value={settings.destructibleCrates}
+                onChange={(v) => settings.updateSetting('destructibleCrates', v)}
               />
               <Toggle
                 label="Hazards"
-                value={settings.map.hazards}
-                onChange={(v) => settings.setMapSetting('hazards', v)}
+                value={settings.hazards}
+                onChange={(v) => settings.updateSetting('hazards', v)}
               />
               <Toggle
                 label="Sudden Death"
-                value={settings.map.suddenDeath}
-                onChange={(v) => settings.setMapSetting('suddenDeath', v)}
+                value={settings.suddenDeath}
+                onChange={(v) => settings.updateSetting('suddenDeath', v)}
               />
               <Toggle
                 label="Power-Ups"
-                value={settings.map.powerUps}
-                onChange={(v) => settings.setMapSetting('powerUps', v)}
+                value={settings.powerUps}
+                onChange={(v) => settings.updateSetting('powerUps', v)}
               />
               <Slider
                 label="Power-up Spawn Rate"
                 min={1}
                 max={20}
-                value={settings.map.powerupSpawnRate}
-                onChange={(v) => settings.setMapSetting('powerupSpawnRate', v)}
-                disabled={!settings.map.powerUps}
+                value={settings.powerupSpawnRate}
+                onChange={(v) => settings.updateSetting('powerupSpawnRate', v)}
+                disabled={!settings.powerUps}
                 valueFormatter={(v) => `${v}s`}
               />
             </div>
@@ -288,30 +287,30 @@ export function OptionsMenu({ onBack }: OptionsMenuProps) {
             <div className="space-y-4">
               <Toggle
                 label="Music"
-                value={settings.audio.musicEnabled}
-                onChange={(v) => settings.setAudioSetting('musicEnabled', v)}
+                value={settings.musicEnabled}
+                onChange={(v) => settings.updateSetting('musicEnabled', v)}
               />
               <Slider
                 label="Music Volume"
                 min={0}
                 max={100}
-                value={settings.audio.musicVolume}
-                onChange={(v) => settings.setAudioSetting('musicVolume', v)}
-                disabled={!settings.audio.musicEnabled}
+                value={settings.musicVolume}
+                onChange={(v) => settings.updateSetting('musicVolume', v)}
+                disabled={!settings.musicEnabled}
                 valueFormatter={(v) => `${v}%`}
               />
               <Toggle
                 label="Sound Effects"
-                value={settings.audio.sfxEnabled}
-                onChange={(v) => settings.setAudioSetting('sfxEnabled', v)}
+                value={settings.soundEffects}
+                onChange={(v) => settings.updateSetting('soundEffects', v)}
               />
               <Slider
                 label="SFX Volume"
                 min={0}
                 max={100}
-                value={settings.audio.sfxVolume}
-                onChange={(v) => settings.setAudioSetting('sfxVolume', v)}
-                disabled={!settings.audio.sfxEnabled}
+                value={settings.sfxVolume}
+                onChange={(v) => settings.updateSetting('sfxVolume', v)}
+                disabled={!settings.soundEffects}
                 valueFormatter={(v) => `${v}%`}
               />
             </div>
@@ -326,27 +325,27 @@ export function OptionsMenu({ onBack }: OptionsMenuProps) {
             <div className="space-y-4">
               <Toggle
                 label="Minimap"
-                value={settings.advanced.minimap}
-                onChange={(v) => settings.setAdvancedSetting('minimap', v)}
+                value={settings.minimap}
+                onChange={(v) => settings.updateSetting('minimap', v)}
               />
               <Toggle
                 label="Kill Cam"
-                value={settings.advanced.killcam}
-                onChange={(v) => settings.setAdvancedSetting('killcam', v)}
+                value={settings.killcam}
+                onChange={(v) => settings.updateSetting('killcam', v)}
               />
               <Toggle
                 label="Time Limit Enabled"
-                value={settings.advanced.timeLimitEnabled}
-                onChange={(v) => settings.setAdvancedSetting('timeLimitEnabled', v)}
+                value={settings.timeLimitEnabled}
+                onChange={(v) => settings.updateSetting('timeLimitEnabled', v)}
               />
               <Slider
                 label="Time Limit"
                 min={30}
                 max={300}
                 step={30}
-                value={settings.advanced.timeLimitSeconds}
-                onChange={(v) => settings.setAdvancedSetting('timeLimitSeconds', v)}
-                disabled={!settings.advanced.timeLimitEnabled}
+                value={settings.timeLimitSeconds}
+                onChange={(v) => settings.updateSetting('timeLimitSeconds', v)}
+                disabled={!settings.timeLimitEnabled}
                 valueFormatter={(v) => {
                   const minutes = Math.floor(v / 60);
                   const seconds = v % 60;
@@ -355,16 +354,16 @@ export function OptionsMenu({ onBack }: OptionsMenuProps) {
               />
               <Toggle
                 label="Score Limit Enabled"
-                value={settings.advanced.scoreLimitEnabled}
-                onChange={(v) => settings.setAdvancedSetting('scoreLimitEnabled', v)}
+                value={settings.scoreLimitEnabled}
+                onChange={(v) => settings.updateSetting('scoreLimitEnabled', v)}
               />
               <Slider
                 label="Score Limit"
                 min={1}
                 max={10}
-                value={settings.advanced.scoreLimitValue}
-                onChange={(v) => settings.setAdvancedSetting('scoreLimitValue', v)}
-                disabled={!settings.advanced.scoreLimitEnabled}
+                value={settings.scoreLimitValue}
+                onChange={(v) => settings.updateSetting('scoreLimitValue', v)}
+                disabled={!settings.scoreLimitEnabled}
                 valueFormatter={(v) => `${v} wins`}
               />
             </div>
@@ -374,7 +373,7 @@ export function OptionsMenu({ onBack }: OptionsMenuProps) {
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => settings.restoreDefaults()}
+            onClick={() => settings.resetToDefaults()}
             className="
               w-full mt-8 py-3 px-6
               text-sm font-bold tracking-wider

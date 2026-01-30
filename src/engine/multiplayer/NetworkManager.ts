@@ -1,4 +1,5 @@
 // NetworkManager - Client-side multiplayer network handler
+import { Logger } from '@/lib/logging/Logger';
 import { io, Socket } from 'socket.io-client';
 import {
     ClientToServerEvents,
@@ -131,14 +132,14 @@ export class NetworkManager {
             });
 
             this.socket.on('connect', () => {
-                console.log('[NetworkManager] Connected to server');
+                Logger.debug('[NetworkManager] Connected to server');
                 this.setStatus('connected');
                 this.startLatencyPing();
                 resolve();
             });
 
             this.socket.on('disconnect', (reason) => {
-                console.log('[NetworkManager] Disconnected:', reason);
+                Logger.debug('[NetworkManager] Disconnected:', reason);
                 this.setStatus('disconnected');
                 this.stopLatencyPing();
             });
@@ -300,7 +301,7 @@ export class NetworkManager {
                 if (data.status === 'matched' && data.sessionId) {
                     clearInterval(pollInterval);
                     // Opponent found! The socket.io 'player_joined' event will handle the rest
-                    console.log('[NetworkManager] Match found via polling!');
+                    Logger.debug('[NetworkManager] Match found via polling!');
                 }
             } catch (error) {
                 console.error('[NetworkManager] Polling error:', error);

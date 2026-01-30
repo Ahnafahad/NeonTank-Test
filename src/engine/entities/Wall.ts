@@ -9,6 +9,7 @@ export class Wall {
   public destructible: boolean;
   public health: number;
   public active: boolean;
+  public id: string;
 
   constructor(x: number, y: number, w: number, h: number, destructible: boolean = false) {
     this.x = x;
@@ -18,6 +19,7 @@ export class Wall {
     this.destructible = destructible;
     this.health = Constants.WALL_HEALTH;
     this.active = true;
+    this.id = `wall-${x}-${y}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
   }
 
   draw(ctx: CanvasRenderingContext2D): void {

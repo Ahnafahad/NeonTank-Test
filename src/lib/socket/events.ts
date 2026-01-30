@@ -21,6 +21,8 @@ export interface PlayerInput {
   sequenceNumber: number;
   // Timestamp when input was created
   timestamp: number;
+  // Timestamp when shoot button was pressed (for lag compensation)
+  shootTimestamp?: number;
 }
 
 // ============================================================================
@@ -119,6 +121,8 @@ export interface GameStateSnapshot {
   // Round info
   roundNumber: number;
   roundActive: boolean;
+  // Server configuration
+  tickRate: number; // Server tick rate (Hz) for client interpolation tuning
   // Delta compression support
   isDelta?: boolean; // True if this is a delta update
   removedBullets?: string[]; // IDs of bullets that were removed

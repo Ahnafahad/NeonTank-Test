@@ -1,5 +1,6 @@
 'use client';
 
+import { Logger } from '@/lib/logging/Logger';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMultiplayer } from '@/hooks/useMultiplayer';
@@ -44,24 +45,24 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
   useEffect(() => {
     if (screen === 'matchmaking' && connectionStatus === 'disconnected') {
       const startMatchmaking = async () => {
-        console.log('[MatchmakingScreen] Starting matchmaking...', { playerName, isJoining, sessionCode });
+        Logger.debug('[MatchmakingScreen] Starting matchmaking...', { playerName, isJoining, sessionCode });
 
         // Update player name in multiplayer system
         updatePlayerName(playerName);
 
-        console.log('[MatchmakingScreen] Connecting to server...');
+        Logger.debug('[MatchmakingScreen] Connecting to server...');
         await connect();
-        console.log('[MatchmakingScreen] Connected!');
+        Logger.debug('[MatchmakingScreen] Connected!');
 
         if (isJoining && sessionCode) {
-          console.log('[MatchmakingScreen] Joining session:', sessionCode);
+          Logger.debug('[MatchmakingScreen] Joining session:', sessionCode);
           await joinSession(sessionCode, {
             scoreLimitValue,
             timeLimitEnabled,
             timeLimitSeconds,
           });
         } else {
-          console.log('[MatchmakingScreen] Finding match...');
+          Logger.debug('[MatchmakingScreen] Finding match...');
           await findMatch({
             scoreLimitValue,
             timeLimitEnabled,
@@ -75,9 +76,9 @@ export function MatchmakingScreen({ onCancel, onMatchStart, joinSessionId }: Mat
 
   // Handle countdown completion
   useEffect(() => {
-    console.log('[MatchmakingScreen] Countdown/Match check:', { countdown, isMatched, connectionStatus });
+    Logger.debug('[MatchmakingScreen] Countdown/Match check:', { countdown, isMatched, connectionStatus });
     if (countdown === 0 && isMatched) {
-      console.log('[MatchmakingScreen] Starting game!');
+      Logger.debug('[MatchmakingScreen] Starting game!');
       onMatchStart(playerName, controlScheme);
     }
   }, [countdown, isMatched, onMatchStart, playerName, controlScheme, connectionStatus]);

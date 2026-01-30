@@ -1,5 +1,6 @@
 'use client';
 
+import { Logger } from '@/lib/logging/Logger';
 import { useEffect, useRef, useCallback, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useGameStore } from '@/store/useGameStore';
@@ -176,7 +177,7 @@ function GameContent() {
         // Set up LAN connection callbacks
         lanNetworkManager.setCallbacks({
           onConnectionLost: () => {
-            console.log('[LAN] Connection lost');
+            Logger.debug('[LAN] Connection lost');
             endGame(isLanHost ? 1 : 2); // End game if connection lost
           }
         });

@@ -1,3 +1,4 @@
+import { Logger } from '@/lib/logging/Logger';
 import Peer, { DataConnection } from 'peerjs';
 
 export interface LANGameState {
@@ -23,7 +24,7 @@ export interface LANGameState {
 }
 
 export interface LANMessage {
-  type: 'input' | 'state' | 'ping' | 'pong' | 'init' | 'start' | 'disconnect';
+  type: 'input' | 'state' | 'ping' | 'pong' | 'init' | 'start' | 'disconnect' | 'ready';
   data?: any;
   timestamp?: number;
 }
@@ -39,6 +40,8 @@ export class LocalMultiplayerServer {
   private onGuestJoin?: (guestId: string) => void;
   private onGuestLeave?: (guestId: string) => void;
   private onInputReceived?: (guestId: string, input: any) => void;
+  private guestReady: boolean = false;
+  private onGuestReadyCallback?: () => void;
 
   constructor() {
     this.roomCode = this.generateRoomCode();
@@ -82,13 +85,13 @@ export class LocalMultiplayerServer {
 
         this.peer.on('open', (id) => {
           clearTimeout(initTimeout);
-          console.log(`[LAN Server] ✅ Successfully hosting with room code: ${id}`);
-          console.log(`[LAN Server] Share this code with your opponent: ${id}`);
+          Logger.debug(`[LAN Server] ✅ Successfully hosting with room code: ${id}`);
+          Logger.debug(`[LAN Server] Share this code with your opponent: ${id}`);
           resolve();
         });
 
         this.peer.on('connection', (conn) => {
-          console.log(`[LAN Server] 🔗 Incoming connection from: ${conn.peer}`);
+          Logger.debug(`[LAN Server] 🔗 Incoming connection from: ${conn.peer}`);
           this.handleGuestConnection(conn);
         });
 
@@ -111,10 +114,10 @@ export class LocalMultiplayerServer {
         });
 
         this.peer.on('disconnected', () => {
-          console.log('[LAN Server] Peer disconnected from signaling server');
+          Logger.debug('[LAN Server] Peer disconnected from signaling server');
           // Try to reconnect to signaling server
           if (this.peer && !this.peer.destroyed) {
-            console.log('[LAN Server] Attempting to reconnect to signaling server...');
+            Logger.debug('[LAN Server] Attempting to reconnect to signaling server...');
             this.peer.reconnect();
           }
         });
@@ -126,7 +129,7 @@ export class LocalMultiplayerServer {
   }
 
   private handleGuestConnection(conn: DataConnection): void {
-    console.log(`[LAN Server] 👤 Guest attempting to connect: ${conn.peer}`);
+    Logger.debug(`[LAN Server] 👤 Guest attempting to connect: ${conn.peer}`);
 
     // Set timeout for connection establishment
     const connectionTimeout = setTimeout(() => {
@@ -138,7 +141,7 @@ export class LocalMultiplayerServer {
 
     conn.on('open', () => {
       clearTimeout(connectionTimeout);
-      console.log(`[LAN Server] ✅ Guest successfully connected: ${conn.peer}`);
+      Logger.debug(`[LAN Server] ✅ Guest successfully connected: ${conn.peer}`);
       this.connections.set(conn.peer, conn);
 
       // Send initialization message
@@ -162,7 +165,7 @@ export class LocalMultiplayerServer {
 
     conn.on('close', () => {
       clearTimeout(connectionTimeout);
-      console.log(`[LAN Server] 👋 Guest disconnected: ${conn.peer}`);
+      Logger.debug(`[LAN Server] 👋 Guest disconnected: ${conn.peer}`);
       this.connections.delete(conn.peer);
       if (this.onGuestLeave) {
         this.onGuestLeave(conn.peer);
@@ -190,6 +193,14 @@ export class LocalMultiplayerServer {
           type: 'pong',
           timestamp: message.timestamp
         });
+        break;
+
+      case 'ready':
+        Logger.debug(`[LAN Server] Guest ${guestId} is ready`);
+        this.guestReady = true;
+        if (this.onGuestReadyCallback) {
+          this.onGuestReadyCallback();
+        }
         break;
 
       default:
@@ -274,8 +285,16 @@ export class LocalMultiplayerServer {
     this.onInputReceived = callback;
   }
 
+  onGuestReady(callback: () => void): void {
+    this.onGuestReadyCallback = callback;
+  }
+
+  isGuestReady(): boolean {
+    return this.guestReady;
+  }
+
   destroy(): void {
-    console.log('[LAN Server] Shutting down');
+    Logger.debug('[LAN Server] Shutting down');
 
     // Stop game loop
     this.stopGameLoop();

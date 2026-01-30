@@ -1,5 +1,6 @@
 'use client';
 
+import { Logger } from '@/lib/logging/Logger';
 import { useEffect, useRef, useCallback, useImperativeHandle, forwardRef, useState } from 'react';
 import { Game, GameMode, GameSettings } from '@/engine/core/Game';
 import { useResponsiveCanvas } from '@/hooks/useResponsiveCanvas';
@@ -97,11 +98,11 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(
           // Set up network callbacks
           networkManager.setCallbacks({
             onStatusChange: (status) => {
-              console.log('[GameCanvas] Network status:', status);
+              Logger.debug('[GameCanvas] Network status:', status);
               setNetworkStatus(status);
             },
             onMatchFound: (opponent, tankId) => {
-              console.log('[GameCanvas] Match found! Assigned tank:', tankId);
+              Logger.debug('[GameCanvas] Match found! Assigned tank:', tankId);
               setAssignedTankId(tankId);
             },
             onGameState: (state) => {
@@ -109,25 +110,25 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(
               // This is where server-authoritative state would be applied
             },
             onPlayerJoined: (player) => {
-              console.log('[GameCanvas] Player joined:', player.name);
+              Logger.debug('[GameCanvas] Player joined:', player.name);
             },
             onPlayerLeft: (playerId, reason) => {
-              console.log('[GameCanvas] Player left:', playerId, reason);
+              Logger.debug('[GameCanvas] Player left:', playerId, reason);
             },
             onGameOver: (winner, scores) => {
-              console.log('[GameCanvas] Network game over:', winner, scores);
+              Logger.debug('[GameCanvas] Network game over:', winner, scores);
               if (gameOverCallbackRef.current) {
                 gameOverCallbackRef.current(winner);
               }
             },
             onCountdown: (countdown) => {
-              console.log('[GameCanvas] Countdown:', countdown);
+              Logger.debug('[GameCanvas] Countdown:', countdown);
             },
             onRoundStart: (roundNumber) => {
-              console.log('[GameCanvas] Round started:', roundNumber);
+              Logger.debug('[GameCanvas] Round started:', roundNumber);
             },
             onRoundOver: (roundNumber, winner, scores) => {
-              console.log('[GameCanvas] Round over:', roundNumber, winner, scores);
+              Logger.debug('[GameCanvas] Round over:', roundNumber, winner, scores);
             },
             onError: (code, message) => {
               console.error('[GameCanvas] Network error:', code, message);
@@ -139,11 +140,11 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(
 
           // Connect to server
           await networkManager.connect();
-          console.log('[GameCanvas] Connected to game server');
+          Logger.debug('[GameCanvas] Connected to game server');
 
           // Start matchmaking
           await networkManager.findMatch();
-          console.log('[GameCanvas] Finding match...');
+          Logger.debug('[GameCanvas] Finding match...');
 
         } catch (error) {
           console.error('[GameCanvas] Failed to initialize network:', error);
@@ -167,7 +168,7 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(
 
       // For online mode, wait until we have an assigned tank ID
       if (mode === 'online' && assignedTankId === null) {
-        console.log('[GameCanvas] Waiting for tank assignment...');
+        Logger.debug('[GameCanvas] Waiting for tank assignment...');
         return;
       }
 
@@ -179,7 +180,7 @@ const GameCanvas = forwardRef<GameCanvasRef, GameCanvasProps>(
       // For online mode, set the local player controls based on assigned tank ID
       if (mode === 'online' && assignedTankId !== null) {
         gameSettings.localPlayerControls = assignedTankId === 1 ? 'wasd' : 'arrows';
-        console.log('[GameCanvas] Local player controls:', gameSettings.localPlayerControls);
+        Logger.debug('[GameCanvas] Local player controls:', gameSettings.localPlayerControls);
       }
 
       // Create game instance

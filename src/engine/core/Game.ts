@@ -1,4 +1,5 @@
 // Main Game orchestrator (extracted from HTML game loop)
+import { Logger } from '@/lib/logging/Logger';
 import { Constants } from '../utils/Constants';
 import { Tank, TankControls } from '../entities/Tank';
 import { Bullet } from '../entities/Bullet';
@@ -9,6 +10,9 @@ import { Particle } from '../entities/Particle';
 import { InputManager } from './InputManager';
 import { TankAI, AIDifficulty } from '../ai';
 import { NetworkManager } from '../multiplayer/NetworkManager';
+import { GameRulesSystem } from '../systems/GameRulesSystem';
+import { RenderSystem } from '../systems/RenderSystem';
+import { EntitySystem } from '../systems/EntitySystem';
 import type { GameStateSnapshot, SerializedTank } from '@/lib/socket/events';
 
 export type GameMode = 'local' | 'ai' | 'online' | 'lan';
@@ -104,6 +108,9 @@ export class Game {
   private tankAI: TankAI | null = null;
   private networkManager: NetworkManager | null = null;
   private assignedTankId: number | null = null;
+  private gameRulesSystem!: GameRulesSystem;
+  private renderSystem: RenderSystem;
+  private entitySystem: EntitySystem;
 
   // Game state
   public state: GameState = 'playing';
@@ -139,16 +146,16 @@ export class Game {
   private readonly MAX_PREDICTION_HISTORY = 60; // Keep last 60 states (1 second at 60fps)
   private remotePlayerState: RemotePlayerState | null = null;
   private serverStateBuffer: BufferedServerState[] = [];
-  private readonly MIN_INTERPOLATION_DELAY = 50; // Minimum buffer (ms) - adjusted for 30Hz
-  private readonly MAX_INTERPOLATION_DELAY = 150; // Maximum buffer (ms) - adjusted for 30Hz
-  private interpolationDelay = 66; // Dynamic interpolation delay (starts at ~2 ticks at 30Hz), 0 for LAN
+  private readonly MIN_INTERPOLATION_DELAY = 15; // Minimum buffer (ms) - ~1 tick at 60Hz
+  private readonly MAX_INTERPOLATION_DELAY = 50; // Maximum buffer (ms) - ~3 ticks at 60Hz
+  private interpolationDelay = 20; // Dynamic interpolation delay (starts at 1.2 ticks at 60Hz), 0 for LAN
   private jitterSamples: number[] = []; // Track jitter over time
   private readonly MAX_JITTER_SAMPLES = 60; // 1 second at 60fps
   private lastStateReceivedTime = 0; // Track when states arrive
   private readonly MAX_BUFFER_SIZE = 10; // Keep last 10 server states
   private lastServerState: GameStateSnapshot | null = null;
-  private readonly RECONCILIATION_THRESHOLD_SMOOTH = 15; // Smooth correction for small errors (pixels)
-  private readonly RECONCILIATION_THRESHOLD_SNAP = 100; // Instant snap for large errors (pixels)
+  private readonly RECONCILIATION_THRESHOLD_SMOOTH = 5; // Smooth correction for small errors (pixels) - tighter for Valorant-level precision
+  private readonly RECONCILIATION_THRESHOLD_SNAP = 200; // Instant snap only for major desync (pixels) - more forgiving to reduce rubber-banding
   // Dead reckoning
   private remotePlayerVelocity = { x: 0, y: 0 }; // Track remote player velocity
   private readonly MAX_EXTRAPOLATION_TIME = 100; // Max time to extrapolate (ms)
@@ -165,6 +172,8 @@ export class Game {
     this.ctx = ctx;
 
     this.mode = mode;
+    this.renderSystem = new RenderSystem();
+    this.entitySystem = new EntitySystem();
     this.inputManager = new InputManager();
 
     // Set interpolation delay based on mode
@@ -287,6 +296,9 @@ export class Game {
     this.gameStartTime = Date.now();
     this.suddenDeathActive = false;
     this.suddenDeathInset = 0;
+
+    // Initialize game rules system
+    this.gameRulesSystem = new GameRulesSystem(this.gameStartTime);
   }
 
   private createMap(): void {
@@ -322,34 +334,17 @@ export class Game {
   private spawnPowerUp(): void {
     if (!this.settings.powerUps || this.powerups.length >= Constants.POWERUP_MAX_COUNT) return;
 
-    // Find empty spot
-    const x = Math.random() * (Constants.GAME_WIDTH - 100) + 50;
-    const y = Math.random() * (Constants.GAME_HEIGHT - 100) + 50;
-
-    // Check collision with walls/crates
-    const allWalls = [...this.walls, ...this.crates];
-    for (const w of allWalls) {
-      if (
-        w.active &&
-        x > w.x - 20 &&
-        x < w.x + w.w + 20 &&
-        y > w.y - 20 &&
-        y < w.y + w.h + 20
-      )
-        return;
+    const powerup = this.entitySystem.spawnPowerUp(this.walls, this.crates, this.hazards);
+    if (powerup) {
+      this.powerups.push(powerup);
     }
-
-    const types: PowerUpType[] = ['HEALTH', 'SPEED', 'SHOTGUN', 'LASER', 'SHIELD'];
-    const type = types[Math.floor(Math.random() * types.length)];
-    this.powerups.push(new PowerUp(x, y, type));
   }
 
   private createExplosion(x: number, y: number, color: string, count: number): void {
     if (!this.settings.particleEffects) return;
 
-    for (let i = 0; i < count; i++) {
-      this.particles.push(new Particle(x, y, color));
-    }
+    const explosionParticles = this.entitySystem.createExplosion(x, y, color, count);
+    this.particles.push(...explosionParticles);
   }
 
   private setupNetworkCallbacks(): void {
@@ -436,7 +431,15 @@ export class Game {
 
     // Apply bullet states - reuse existing instances to preserve trails
     const existingBullets = new Map<string, Bullet>();
-    this.bullets.forEach(b => existingBullets.set(b.id, b));
+    const predictedBullets: Bullet[] = [];
+
+    this.bullets.forEach(b => {
+      if (b.isPredicted) {
+        predictedBullets.push(b);
+      } else {
+        existingBullets.set(b.id, b);
+      }
+    });
 
     this.bullets = mergedState.bullets.map((bulletData) => {
       let bullet = existingBullets.get(bulletData.id);
@@ -450,40 +453,100 @@ export class Game {
         bullet.bounces = bulletData.bounces;
         bullet.active = true; // Ensure active
       } else {
-        // Create new bullet
-        const angle = Math.atan2(bulletData.velY, bulletData.velX);
-        bullet = new Bullet(
-          bulletData.x,
-          bulletData.y,
-          angle,
-          bulletData.color,
-          bulletData.ownerId,
-          bulletData.type
+        // Try to match with predicted bullet (same owner, close position)
+        const matchedPredicted = predictedBullets.find(pb =>
+          pb.ownerId === bulletData.ownerId &&
+          Math.abs(pb.pos.x - bulletData.x) < 50 &&
+          Math.abs(pb.pos.y - bulletData.y) < 50
         );
-        // Important: Sync ID and Velocity exactly
-        bullet.id = bulletData.id;
-        bullet.vel.x = bulletData.velX;
-        bullet.vel.y = bulletData.velY;
-        bullet.bounces = bulletData.bounces;
+
+        if (matchedPredicted) {
+          // Reuse predicted bullet, just update to server authority
+          bullet = matchedPredicted;
+          bullet.id = bulletData.id; // Use server ID
+          bullet.isPredicted = false; // No longer predicted
+          bullet.predictionId = undefined;
+          // Smooth blend to server position (90% server, 10% predicted)
+          bullet.pos.x = bulletData.x * 0.9 + bullet.pos.x * 0.1;
+          bullet.pos.y = bulletData.y * 0.9 + bullet.pos.y * 0.1;
+          bullet.vel.x = bulletData.velX;
+          bullet.vel.y = bulletData.velY;
+          bullet.bounces = bulletData.bounces;
+          // Remove from predicted list
+          const idx = predictedBullets.indexOf(matchedPredicted);
+          if (idx !== -1) predictedBullets.splice(idx, 1);
+        } else {
+          // Create new bullet
+          const angle = Math.atan2(bulletData.velY, bulletData.velX);
+          bullet = new Bullet(
+            bulletData.x,
+            bulletData.y,
+            angle,
+            bulletData.color,
+            bulletData.ownerId,
+            bulletData.type
+          );
+          // Important: Sync ID and Velocity exactly
+          bullet.id = bulletData.id;
+          bullet.vel.x = bulletData.velX;
+          bullet.vel.y = bulletData.velY;
+          bullet.bounces = bulletData.bounces;
+        }
       }
       return bullet;
     });
 
-    // Apply powerup states
+    // Remove any remaining predicted bullets that weren't matched
+    // (likely server rejected them or they already hit something)
+    // Keep them for a short while in case of packet loss
+    for (const pb of predictedBullets) {
+      const age = Date.now() - (parseInt(pb.predictionId?.split('-')[1] || '0'));
+      if (age < 500) { // Keep for 500ms
+        this.bullets.push(pb);
+      }
+    }
+
+    // Apply powerup states - reuse existing instances to prevent blinking
+    const existingPowerups = new Map<string, PowerUp>();
+    this.powerups.forEach(p => existingPowerups.set(p.id, p));
+
     this.powerups = mergedState.powerups
       .filter((p) => p.active)
       .map((powerupData) => {
-        const powerup = new PowerUp(powerupData.x, powerupData.y, powerupData.type);
+        let powerup = existingPowerups.get(powerupData.id);
+
+        if (powerup) {
+          // Update existing powerup (position shouldn't change, but update type if needed)
+          powerup.type = powerupData.type;
+        } else {
+          // Create new powerup
+          powerup = new PowerUp(powerupData.x, powerupData.y, powerupData.type);
+          powerup.id = powerupData.id; // Sync ID
+        }
         return powerup;
       });
 
-    // Apply wall states (crates can be destroyed)
+    // Apply wall states (crates can be destroyed) - reuse existing instances to prevent blinking
+    const existingCrates = new Map<string, Wall>();
+    this.crates.forEach(c => existingCrates.set(c.id, c));
+
     const updatedCrates: Wall[] = [];
     for (const wallData of mergedState.walls) {
       if (wallData.destructible && wallData.active) {
-        const crate = new Wall(wallData.x, wallData.y, wallData.w, wallData.h, true);
-        if (wallData.health !== undefined) {
-          crate.health = wallData.health;
+        let crate = existingCrates.get(wallData.id);
+
+        if (crate) {
+          // Update existing crate health
+          if (wallData.health !== undefined) {
+            crate.health = wallData.health;
+          }
+        } else {
+          // Create new crate
+          crate = new Wall(wallData.x, wallData.y, wallData.w, wallData.h, true);
+          crate.id = wallData.id; // Sync ID
+          if (wallData.health !== undefined) {
+            crate.health = wallData.health;
+          }
         }
         updatedCrates.push(crate);
       }
@@ -595,7 +658,7 @@ export class Game {
     // Hybrid reconciliation based on error magnitude
     if (positionError > this.RECONCILIATION_THRESHOLD_SNAP) {
       // Large error - instant snap + replay to prevent major desync
-      console.log(`[Reconciliation] SNAP: error=${positionError.toFixed(2)}px`);
+      Logger.debug(`[Reconciliation] SNAP: error=${positionError.toFixed(2)}px`);
 
       // Reset to server state
       localTank.pos.x = serverTank.x;
@@ -619,9 +682,9 @@ export class Game {
       this.replayPredictions();
     } else if (positionError > this.RECONCILIATION_THRESHOLD_SMOOTH) {
       // Small error - smooth correction without replay
-      console.log(`[Reconciliation] SMOOTH: error=${positionError.toFixed(2)}px`);
+      Logger.debug(`[Reconciliation] SMOOTH: error=${positionError.toFixed(2)}px`);
 
-      const alpha = 0.8; // 80% correction per update (very fast convergence for real-time feel)
+      const alpha = 0.15; // 15% correction per frame - smooth over ~7 frames (100ms at 60fps) to eliminate rubber-banding
       localTank.pos.x += (serverTank.x - localTank.pos.x) * alpha;
       localTank.pos.y += (serverTank.y - localTank.pos.y) * alpha;
 
@@ -733,10 +796,15 @@ export class Game {
     // Calculate average jitter (time between state updates)
     const avgJitter = this.jitterSamples.reduce((a, b) => a + b, 0) / this.jitterSamples.length;
 
-    // Calculate target delay: 3x average jitter (safe buffer)
+    // Get server tick rate from last state (default 60Hz if not available)
+    const serverTickRate = this.lastServerState?.tickRate || 60;
+    const tickPeriod = 1000 / serverTickRate; // Time per tick in ms
+
+    // Calculate target delay: 2x tick period + 2x jitter for safety
+    // This is more aggressive than before (was 3x jitter) for Valorant-level responsiveness
     const targetDelay = Math.min(
       this.MAX_INTERPOLATION_DELAY,
-      Math.max(this.MIN_INTERPOLATION_DELAY, avgJitter * 3)
+      Math.max(this.MIN_INTERPOLATION_DELAY, tickPeriod * 2 + avgJitter * 2)
     );
 
     // Smooth adjustment with 10% alpha filter
@@ -914,6 +982,13 @@ export class Game {
         this.settings,
         deltaMultiplier
       );
+
+      // Mark new bullets as predicted for reconciliation
+      for (const bullet of newBullets) {
+        bullet.isPredicted = true;
+        bullet.predictionId = `pred-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      }
+
       this.bullets.push(...newBullets);
 
       // Save predicted state for later reconciliation
@@ -1014,40 +1089,22 @@ export class Game {
     );
     this.bullets.push(...p2Bullets);
 
-    // Timer & Sudden Death
-    const elapsed = Date.now() - this.gameStartTime;
-
-    if (this.settings.suddenDeath && elapsed > Constants.SUDDEN_DEATH_TIME) {
-      if (!this.suddenDeathActive) {
-        this.suddenDeathActive = true;
-      }
-      this.suddenDeathInset += Constants.SUDDEN_DEATH_INSET_SPEED * deltaMultiplier;
-    }
+    // Timer & Sudden Death - delegate to GameRulesSystem
+    const suddenDeathState = this.gameRulesSystem.updateSuddenDeath(this.settings, deltaMultiplier);
+    this.suddenDeathActive = suddenDeathState.active;
+    this.suddenDeathInset = suddenDeathState.inset;
 
     // Check time limit win condition (local/AI mode only - server handles online mode)
-    if (this.settings.timeLimitEnabled && this.mode !== 'online') {
-      const timeLimit = this.settings.timeLimitSeconds * 1000;
-      if (elapsed >= timeLimit) {
-        // Time expired - determine winner
-        let winnerId: number;
+    if (this.mode !== 'online') {
+      const timeLimitWinner = this.gameRulesSystem.checkTimeLimit(
+        this.settings,
+        this.scores,
+        this.p1.health,
+        this.p2.health
+      );
 
-        if (this.scores.p1 > this.scores.p2) {
-          winnerId = 1;
-        } else if (this.scores.p2 > this.scores.p1) {
-          winnerId = 2;
-        } else {
-          // Tied score - use health tiebreaker
-          if (this.p1.health > this.p2.health) {
-            winnerId = 1;
-          } else if (this.p2.health > this.p1.health) {
-            winnerId = 2;
-          } else {
-            // Perfect tie - random winner
-            winnerId = Math.random() < 0.5 ? 1 : 2;
-          }
-        }
-
-        this.endGame(winnerId);
+      if (timeLimitWinner !== null) {
+        this.endGame(timeLimitWinner);
       }
     }
 
@@ -1134,99 +1191,25 @@ export class Game {
   }
 
   private draw(): void {
-    // Background
-    this.ctx.fillStyle = Constants.BACKGROUND_COLOR;
-    this.ctx.fillRect(0, 0, Constants.GAME_WIDTH, Constants.GAME_HEIGHT);
-
-    // Grid
-    this.ctx.strokeStyle = Constants.GRID_COLOR;
-    this.ctx.lineWidth = 1;
-    this.ctx.beginPath();
-    for (let x = 0; x < Constants.GAME_WIDTH; x += 50) {
-      this.ctx.moveTo(x, 0);
-      this.ctx.lineTo(x, Constants.GAME_HEIGHT);
-    }
-    for (let y = 0; y < Constants.GAME_HEIGHT; y += 50) {
-      this.ctx.moveTo(0, y);
-      this.ctx.lineTo(Constants.GAME_WIDTH, y);
-    }
-    this.ctx.stroke();
-
-    // Draw Hazards
-    for (const h of this.hazards) {
-      h.draw(this.ctx);
-    }
-
-    // Draw Map
-    for (const w of this.walls) {
-      w.draw(this.ctx);
-    }
-    for (const c of this.crates) {
-      c.draw(this.ctx);
-    }
-
-    // Draw PowerUps
-    for (const p of this.powerups) {
-      p.draw(this.ctx);
-    }
-
-    // Draw Tanks
-    this.p1.draw(this.ctx);
-    this.p2.draw(this.ctx);
-
-    // Draw Bullets
-    for (const b of this.bullets) {
-      b.draw(this.ctx);
-    }
-
-    // Draw Particles
-    for (const p of this.particles) {
-      p.draw(this.ctx);
-    }
-
-    // Draw Sudden Death Walls
-    if (this.suddenDeathActive) {
-      this.ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
-      this.ctx.fillRect(0, 0, Constants.GAME_WIDTH, this.suddenDeathInset);
-      this.ctx.fillRect(0, Constants.GAME_HEIGHT - this.suddenDeathInset, Constants.GAME_WIDTH, this.suddenDeathInset);
-      this.ctx.fillRect(0, 0, this.suddenDeathInset, Constants.GAME_HEIGHT);
-      this.ctx.fillRect(Constants.GAME_WIDTH - this.suddenDeathInset, 0, this.suddenDeathInset, Constants.GAME_HEIGHT);
-
-      this.ctx.strokeStyle = '#ff0000';
-      this.ctx.lineWidth = 2;
-      this.ctx.strokeRect(
-        this.suddenDeathInset,
-        this.suddenDeathInset,
-        Constants.GAME_WIDTH - this.suddenDeathInset * 2,
-        Constants.GAME_HEIGHT - this.suddenDeathInset * 2
-      );
-    }
-
-    // Draw Round Winner Overlay
-    if (this.roundWinner !== null) {
-      this.ctx.save();
-      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      this.ctx.fillRect(0, 0, Constants.GAME_WIDTH, Constants.GAME_HEIGHT);
-
-      this.ctx.font = 'bold 48px Orbitron, sans-serif';
-      this.ctx.textAlign = 'center';
-      this.ctx.textBaseline = 'middle';
-
-      const text = this.roundWinner === 1 ? 'RED WINS ROUND' : 'BLUE WINS ROUND';
-      const color = this.roundWinner === 1 ? Constants.PLAYER1_COLOR : Constants.PLAYER2_COLOR;
-
-      this.ctx.fillStyle = color;
-      this.ctx.shadowBlur = 20;
-      this.ctx.shadowColor = color;
-      this.ctx.fillText(text, Constants.GAME_WIDTH / 2, Constants.GAME_HEIGHT / 2);
-
-      this.ctx.font = '24px Orbitron, sans-serif';
-      this.ctx.fillStyle = '#fff';
-      this.ctx.shadowBlur = 0;
-      this.ctx.fillText(`Round ${this.scores.p1 + this.scores.p2 + 1} starting soon...`, Constants.GAME_WIDTH / 2, Constants.GAME_HEIGHT / 2 + 50);
-
-      this.ctx.restore();
-    }
+    // Delegate to RenderSystem
+    this.renderSystem.render(
+      this.ctx,
+      {
+        tanks: [this.p1, this.p2],
+        bullets: this.bullets,
+        powerups: this.powerups,
+        walls: this.walls,
+        crates: this.crates,
+        hazards: this.hazards,
+        particles: this.particles
+      },
+      {
+        active: this.suddenDeathActive,
+        inset: this.suddenDeathInset
+      },
+      this.roundWinner,
+      this.scores
+    );
   }
 
   private gameLoop = (currentTime: number): void => {
@@ -1278,6 +1261,9 @@ export class Game {
     this.suddenDeathActive = false;
     this.suddenDeathInset = 0;
 
+    // Reset game rules system
+    this.gameRulesSystem.reset(this.gameStartTime);
+
     this.start();
   }
 
@@ -1306,11 +1292,11 @@ export class Game {
   }
 
   public getGameTime(): number {
-    return Date.now() - this.gameStartTime;
+    return this.gameRulesSystem.getGameTime();
   }
 
   public isSuddenDeath(): boolean {
-    return this.suddenDeathActive;
+    return this.gameRulesSystem.getSuddenDeathState().active;
   }
 
   public destroy(): void {
@@ -1327,7 +1313,7 @@ export class Game {
 
   // LAN connection setup (placeholder for future integration)
   public setLANConnection(isHost: boolean, server: any, client: any): void {
-    console.log('[Game] LAN connection set:', { isHost, server, client });
+    Logger.debug('[Game] LAN connection set:', { isHost, server, client });
     // TODO: Integrate LAN server/client with game loop
     // This will be implemented when we create LANNetworkManager
   }

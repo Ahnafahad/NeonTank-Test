@@ -1,5 +1,6 @@
 // Socket.io Server Configuration for Neon Tank Duel
 
+import { Logger } from '@/lib/logging/Logger';
 import { Server as NetServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import {
@@ -44,6 +45,21 @@ export type NeonTankServer = SocketIOServer<
 >;
 
 // ============================================================================
+// Lag Compensation
+// ============================================================================
+
+interface HistoricalState {
+  timestamp: number;
+  tick: number;
+  tankPositions: Map<number, { x: number; y: number; angle: number }>;
+}
+
+interface BulletMetadata {
+  shootTimestamp: number;
+  shooterLatency: number;
+}
+
+// ============================================================================
 // Game Session
 // ============================================================================
 
@@ -64,6 +80,7 @@ export interface GameSession {
   // Game entities
   tanks: Map<number, Tank>; // tankId -> Tank
   bullets: Bullet[];
+  bulletMetadata: Map<Bullet, BulletMetadata>; // Track lag compensation data per bullet
   powerups: PowerUp[];
   walls: Wall[];
   crates: Wall[];
@@ -83,6 +100,8 @@ export interface GameSession {
   lastBroadcastState: GameStateSnapshot | null;
   // Spatial partitioning
   spatialGrid: SpatialGrid<Tank | Bullet>;
+  // Lag compensation - state history for rewinding
+  stateHistory: HistoricalState[];
 }
 
 // ============================================================================
@@ -101,7 +120,7 @@ class SessionManager {
       gameState: 'waiting',
       stateSnapshot: null,
       inputBuffer: new Map(),
-      tickRate: 30, // 30 Hz server tick rate (reduced from 60 for bandwidth/CPU savings)
+      tickRate: 60, // 60 Hz server tick rate for Valorant-level responsiveness
       tickInterval: null,
       currentTick: 0,
       createdAt: Date.now(),
@@ -111,6 +130,7 @@ class SessionManager {
       // Game entities
       tanks: new Map(),
       bullets: [],
+      bulletMetadata: new Map(),
       powerups: [],
       walls: [],
       crates: [],
@@ -124,6 +144,8 @@ class SessionManager {
       lastBroadcastState: null,
       // Spatial partitioning
       spatialGrid: new SpatialGrid(Constants.GAME_WIDTH, Constants.GAME_HEIGHT, 100),
+      // Lag compensation
+      stateHistory: [],
     };
 
     this.sessions.set(sessionId, session);
@@ -224,7 +246,7 @@ const sessionManager = new SessionManager();
 
 export function initializeSocketServer(httpServer: NetServer): NeonTankServer {
   if (io) {
-    console.log('[Socket.io] Server already initialized');
+    Logger.debug('[Socket.io] Server already initialized');
     return io;
   }
 
@@ -251,7 +273,7 @@ export function initializeSocketServer(httpServer: NetServer): NeonTankServer {
   // ============================================================================
 
   io.on('connection', (socket: NeonTankSocket) => {
-    console.log(`[Socket.io] Client connected: ${socket.id}`);
+    Logger.debug(`[Socket.io] Client connected: ${socket.id}`);
 
     // Initialize socket data
     socket.data.lastActivity = Date.now();
@@ -265,7 +287,7 @@ export function initializeSocketServer(httpServer: NetServer): NeonTankServer {
     socket.on('join_game', (payload, callback) => {
       const { sessionId, playerId, playerName, gameSettings } = payload;
 
-      console.log(`[Socket.io] Player ${playerId} (${playerName}) joining session ${sessionId}`);
+      Logger.debug(`[Socket.io] Player ${playerId} (${playerName}) joining session ${sessionId}`);
 
       // Get or create session
       let session = sessionManager.getSession(sessionId);
@@ -355,7 +377,7 @@ export function initializeSocketServer(httpServer: NetServer): NeonTankServer {
     socket.on('leave_game', (payload) => {
       const { sessionId, playerId, reason } = payload;
 
-      console.log(`[Socket.io] Player ${playerId} leaving session ${sessionId}: ${reason}`);
+      Logger.debug(`[Socket.io] Player ${playerId} leaving session ${sessionId}: ${reason}`);
 
       handlePlayerLeave(socket, playerId, reason || 'quit');
     });
@@ -390,7 +412,7 @@ export function initializeSocketServer(httpServer: NetServer): NeonTankServer {
     socket.on('player_ready', (payload) => {
       const { sessionId, playerId } = payload;
 
-      console.log(`[Socket.io] Player ${playerId} ready in session ${sessionId}`);
+      Logger.debug(`[Socket.io] Player ${playerId} ready in session ${sessionId}`);
 
       const session = sessionManager.getSession(sessionId);
       if (!session) return;
@@ -438,7 +460,7 @@ export function initializeSocketServer(httpServer: NetServer): NeonTankServer {
     // ========================================================================
 
     socket.on('disconnect', (reason) => {
-      console.log(`[Socket.io] Client disconnected: ${socket.id}, reason: ${reason}`);
+      Logger.debug(`[Socket.io] Client disconnected: ${socket.id}, reason: ${reason}`);
 
       if (socket.data.playerId && socket.data.sessionId) {
         handlePlayerLeave(socket, socket.data.playerId, 'disconnect');
@@ -451,7 +473,7 @@ export function initializeSocketServer(httpServer: NetServer): NeonTankServer {
     sessionManager.cleanupInactiveSessions();
   }, 60000); // Every minute
 
-  console.log('[Socket.io] Server initialized');
+  Logger.debug('[Socket.io] Server initialized');
 
   return io;
 }
@@ -880,6 +902,37 @@ function bulletHasMoved(bullet: SerializedBullet, lastBullet: SerializedBullet):
   return distMoved > 0.5; // Only send if moved more than 0.5 pixels
 }
 
+/**
+ * Get historical tank position for lag compensation
+ * Rewinds to (shootTimestamp - latency/2) to compensate for network delay
+ */
+function getHistoricalTankPosition(
+  session: GameSession,
+  tankId: number,
+  shootTimestamp: number,
+  shooterLatency: number
+): { x: number; y: number; angle: number } | null {
+  // Calculate the target time to rewind to
+  const rewindTime = shootTimestamp - (shooterLatency / 2);
+
+  // Find the closest historical state
+  let closestState: HistoricalState | null = null;
+  let minTimeDiff = Infinity;
+
+  for (const state of session.stateHistory) {
+    const timeDiff = Math.abs(state.timestamp - rewindTime);
+    if (timeDiff < minTimeDiff) {
+      minTimeDiff = timeDiff;
+      closestState = state;
+    }
+  }
+
+  if (!closestState) return null;
+
+  // Get tank position from historical state
+  return closestState.tankPositions.get(tankId) || null;
+}
+
 function processGameTick(sessionId: string): void {
   const session = sessionManager.getSession(sessionId);
   if (!session || !io) return;
@@ -983,6 +1036,17 @@ function processGameTick(sessionId: string): void {
               gameSettings,
               1.0 // deltaMultiplier
             );
+
+            // Store lag compensation metadata for new bullets
+            if (newBullets.length > 0 && input.shootTimestamp) {
+              for (const bullet of newBullets) {
+                session.bulletMetadata.set(bullet, {
+                  shootTimestamp: input.shootTimestamp,
+                  shooterLatency: player.latency
+                });
+              }
+            }
+
             session.bullets.push(...newBullets);
           }
           }
@@ -1017,6 +1081,7 @@ function processGameTick(sessionId: string): void {
     bullet.update(session.walls, session.crates);
 
     if (!bullet.active) {
+      session.bulletMetadata.delete(bullet); // Clean up metadata
       session.bullets.splice(i, 1);
       continue;
     }
@@ -1031,15 +1096,46 @@ function processGameTick(sessionId: string): void {
         if (tank.dead) continue;
         if (bullet.ownerId === tank.id) continue; // No friendly fire
 
-        // Simple AABB collision
-        if (
-          bullet.pos.x > tank.pos.x - 18 &&
-          bullet.pos.x < tank.pos.x + 18 &&
-          bullet.pos.y > tank.pos.y - 18 &&
-          bullet.pos.y < tank.pos.y + 18
-        ) {
+        // Lag compensation: check against historical position if available
+        const metadata = session.bulletMetadata.get(bullet);
+        let hitDetected = false;
+
+        if (metadata && session.stateHistory.length > 0) {
+          // Use lag-compensated historical position
+          const historicalPos = getHistoricalTankPosition(
+            session,
+            tank.id,
+            metadata.shootTimestamp,
+            metadata.shooterLatency
+          );
+
+          if (historicalPos) {
+            // Check collision against historical position
+            hitDetected = (
+              bullet.pos.x > historicalPos.x - 18 &&
+              bullet.pos.x < historicalPos.x + 18 &&
+              bullet.pos.y > historicalPos.y - 18 &&
+              bullet.pos.y < historicalPos.y + 18
+            );
+          }
+        }
+
+        // Fallback to current position if no lag compensation data
+        if (!hitDetected && !metadata) {
+          hitDetected = (
+            bullet.pos.x > tank.pos.x - 18 &&
+            bullet.pos.x < tank.pos.x + 18 &&
+            bullet.pos.y > tank.pos.y - 18 &&
+            bullet.pos.y < tank.pos.y + 18
+          );
+        }
+
+        if (hitDetected) {
           tank.hit();
           bullet.active = false;
+
+          // Clean up metadata
+          session.bulletMetadata.delete(bullet);
 
           // Check if tank died
           if (tank.dead) {
@@ -1060,6 +1156,7 @@ function processGameTick(sessionId: string): void {
     }
 
     if (!bullet.active) {
+      session.bulletMetadata.delete(bullet); // Clean up metadata
       session.bullets.splice(i, 1);
     }
   }
@@ -1188,7 +1285,28 @@ function processGameTick(sessionId: string): void {
     suddenDeathInset: session.suddenDeathInset,
     roundNumber: session.roundNumber,
     roundActive: session.gameState === 'playing',
+    tickRate: session.tickRate,
   };
+
+  // Store state in history for lag compensation (keep last 60 states = 1 second at 60Hz)
+  const historicalState: HistoricalState = {
+    timestamp: fullStateSnapshot.timestamp,
+    tick: fullStateSnapshot.tick,
+    tankPositions: new Map(
+      Array.from(session.tanks.entries()).map(([id, tank]) => [
+        id,
+        { x: tank.pos.x, y: tank.pos.y, angle: tank.angle }
+      ])
+    )
+  };
+
+  session.stateHistory.push(historicalState);
+
+  // Keep only last 60 states (1 second of history at 60Hz)
+  const MAX_HISTORY_SIZE = 60;
+  if (session.stateHistory.length > MAX_HISTORY_SIZE) {
+    session.stateHistory.shift();
+  }
 
   // Compute delta against last broadcast state
   const deltaState = computeStateDelta(fullStateSnapshot, session.lastBroadcastState, isSlowTick);

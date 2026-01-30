@@ -1,3 +1,4 @@
+import { Logger } from '@/lib/logging/Logger';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { LocalMultiplayerServer } from '../lib/socket/localServer';
 import { LocalMultiplayerClient } from '../lib/socket/localClient';
@@ -53,18 +54,24 @@ export function useLANMultiplayer() {
 
       // Set up callbacks
       server.onGuestJoined((guestId) => {
-        console.log(`Guest joined: ${guestId}`);
-        setState(prev => ({
-          ...prev,
-          isReady: true
-        }));
+        Logger.debug(`Guest joined: ${guestId}`);
+        // Don't set isReady yet - wait for explicit ready signal
       });
 
       server.onGuestLeft((guestId) => {
-        console.log(`Guest left: ${guestId}`);
+        Logger.debug(`Guest left: ${guestId}`);
         setState(prev => ({
           ...prev,
           isReady: false
+        }));
+      });
+
+      // Set up ready callback
+      server.onGuestReady(() => {
+        Logger.debug('Guest is ready, triggering countdown');
+        setState(prev => ({
+          ...prev,
+          isReady: true
         }));
       });
 
@@ -96,11 +103,11 @@ export function useLANMultiplayer() {
 
       // Set up callbacks before connecting
       client.onConnect(() => {
-        console.log('Connected to host');
+        Logger.debug('Connected to host');
         setState(prev => ({
           ...prev,
-          status: 'connected',
-          isReady: true
+          status: 'connected'
+          // Don't set isReady here - will be set by readyUp()
         }));
 
         // Start latency monitoring
@@ -114,7 +121,7 @@ export function useLANMultiplayer() {
       });
 
       client.onDisconnect(() => {
-        console.log('Disconnected from host');
+        Logger.debug('Disconnected from host');
         setState(prev => ({
           ...prev,
           status: 'disconnected',
@@ -209,6 +216,25 @@ export function useLANMultiplayer() {
     return clientRef.current;
   }, []);
 
+  // Signal ready (called after callbacks are set)
+  const readyUp = useCallback(() => {
+    if (state.role === 'guest' && clientRef.current) {
+      Logger.debug('[useLANMultiplayer] Guest calling readyUp()');
+      clientRef.current.sendReady();
+      setState(prev => ({
+        ...prev,
+        isReady: true
+      }));
+    } else if (state.role === 'host') {
+      Logger.debug('[useLANMultiplayer] Host is already ready');
+      // Host is always ready once connected
+      setState(prev => ({
+        ...prev,
+        isReady: true
+      }));
+    }
+  }, [state.role]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -222,6 +248,7 @@ export function useLANMultiplayer() {
     joinGame,
     disconnect,
     getServer,
-    getClient
+    getClient,
+    readyUp
   };
 }

@@ -22,6 +22,10 @@ export class Bullet {
   public trailLength: number = 5;
   public trailsEnabled: boolean = false;
 
+  // Client-side prediction
+  public isPredicted: boolean = false;
+  public predictionId?: string;
+
   constructor(x: number, y: number, angle: number, ownerColor: string, ownerId: number, type: BulletType = 'NORMAL') {
     this.pos = new Vector(x, y);
 

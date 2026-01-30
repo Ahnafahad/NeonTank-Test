@@ -1,3 +1,4 @@
+import { Logger } from '@/lib/logging/Logger';
 import { LocalMultiplayerServer, LANGameState, LANMessage } from '../../lib/socket/localServer';
 import { LocalMultiplayerClient } from '../../lib/socket/localClient';
 import type { Tank } from '../entities/Tank';
@@ -46,11 +47,11 @@ export class LANNetworkManager {
     this.server.onInput((guestId, input) => {
       // Forward input to game engine
       // The host game engine will process this input for the guest tank
-      console.log('[LANNetworkManager] Received input from guest:', input);
+      Logger.debug('[LANNetworkManager] Received input from guest:', input);
     });
 
     this.server.onGuestLeft((guestId) => {
-      console.log('[LANNetworkManager] Guest disconnected:', guestId);
+      Logger.debug('[LANNetworkManager] Guest disconnected:', guestId);
       if (this.callbacks.onConnectionLost) {
         this.callbacks.onConnectionLost();
       }
@@ -68,7 +69,7 @@ export class LANNetworkManager {
     });
 
     this.client.onDisconnect(() => {
-      console.log('[LANNetworkManager] Disconnected from host');
+      Logger.debug('[LANNetworkManager] Disconnected from host');
       if (this.callbacks.onConnectionLost) {
         this.callbacks.onConnectionLost();
       }

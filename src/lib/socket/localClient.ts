@@ -1,3 +1,4 @@
+import { Logger } from '@/lib/logging/Logger';
 import Peer, { DataConnection } from 'peerjs';
 import { LANMessage, LANGameState } from './localServer';
 
@@ -11,6 +12,8 @@ export class LocalMultiplayerClient {
   private onDisconnected?: () => void;
   private onError?: (error: Error) => void;
   private latencyMeasurements: number[] = [];
+  private inputBuffer: any[] = [];
+  private ready: boolean = false;
 
   async connect(roomCode: string): Promise<void> {
     this.roomCode = roomCode;
@@ -42,8 +45,8 @@ export class LocalMultiplayerClient {
         });
 
         this.peer.on('open', (id) => {
-          console.log(`[LAN Client] Peer initialized with ID: ${id}`);
-          console.log(`[LAN Client] Attempting to connect to host: ${roomCode}`);
+          Logger.debug(`[LAN Client] Peer initialized with ID: ${id}`);
+          Logger.debug(`[LAN Client] Attempting to connect to host: ${roomCode}`);
 
           // Connect to host using room code
           this.connection = this.peer!.connect(roomCode, {
@@ -80,10 +83,10 @@ export class LocalMultiplayerClient {
         });
 
         this.peer.on('disconnected', () => {
-          console.log('[LAN Client] Peer disconnected from signaling server');
+          Logger.debug('[LAN Client] Peer disconnected from signaling server');
           // Try to reconnect to signaling server
           if (this.peer && !this.peer.destroyed) {
-            console.log('[LAN Client] Attempting to reconnect to signaling server...');
+            Logger.debug('[LAN Client] Attempting to reconnect to signaling server...');
             this.peer.reconnect();
           }
         });
@@ -112,7 +115,7 @@ export class LocalMultiplayerClient {
     this.connection.on('open', () => {
       clearTimeout(timeoutId);
       clearTimeout(connectionEstablishTimeout);
-      console.log(`[LAN Client] ✅ Successfully connected to host: ${this.roomCode}`);
+      Logger.debug(`[LAN Client] ✅ Successfully connected to host: ${this.roomCode}`);
 
       if (this.onConnected) {
         this.onConnected();
@@ -130,7 +133,7 @@ export class LocalMultiplayerClient {
 
     this.connection.on('close', () => {
       clearTimeout(connectionEstablishTimeout);
-      console.log('[LAN Client] Connection closed');
+      Logger.debug('[LAN Client] Connection closed');
       if (this.onDisconnected) {
         this.onDisconnected();
       }
@@ -153,7 +156,7 @@ export class LocalMultiplayerClient {
     switch (message.type) {
       case 'init':
         this.hostId = message.data.hostId;
-        console.log(`[LAN Client] Initialized with host: ${this.hostId}`);
+        Logger.debug(`[LAN Client] Initialized with host: ${this.hostId}`);
         break;
 
       case 'state':
@@ -173,12 +176,12 @@ export class LocalMultiplayerClient {
             this.latencyMeasurements.shift();
           }
 
-          console.log(`[LAN Client] Latency: ${latency}ms`);
+          Logger.debug(`[LAN Client] Latency: ${latency}ms`);
         }
         break;
 
       case 'start':
-        console.log('[LAN Client] Game starting');
+        Logger.debug('[LAN Client] Game starting');
         break;
 
       default:
@@ -187,12 +190,40 @@ export class LocalMultiplayerClient {
   }
 
   sendInput(input: any): void {
+    if (!this.ready) {
+      // Buffer inputs until ready
+      this.inputBuffer.push(input);
+      return;
+    }
+
     if (this.connection && this.connection.open) {
       this.send({
         type: 'input',
         data: input,
         timestamp: Date.now()
       });
+    }
+  }
+
+  sendReady(): void {
+    if (this.connection && this.connection.open) {
+      this.ready = true;
+      Logger.debug('[LAN Client] Sending ready signal to host');
+
+      this.send({
+        type: 'ready',
+        timestamp: Date.now()
+      });
+
+      // Flush buffered inputs
+      this.inputBuffer.forEach(input => {
+        this.send({
+          type: 'input',
+          data: input,
+          timestamp: Date.now()
+        });
+      });
+      this.inputBuffer = [];
     }
   }
 
@@ -253,7 +284,7 @@ export class LocalMultiplayerClient {
   }
 
   destroy(): void {
-    console.log('[LAN Client] Shutting down');
+    Logger.debug('[LAN Client] Shutting down');
 
     // Close connection
     if (this.connection) {
