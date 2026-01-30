@@ -571,6 +571,9 @@ function initializeGameEntities(session: GameSession): void {
   session.crates.push(new Wall(450, 200, 100, 40, true));
   session.crates.push(new Wall(450, 460, 100, 40, true));
 
+  // Log crate IDs for debugging flickering
+  console.log('[Server] Created crates with IDs:', session.crates.map(c => c.id).join(', '));
+
   // Reset game state
   session.gameStartTime = Date.now();
   session.lastPowerUpTime = Date.now();
@@ -1287,6 +1290,12 @@ function processGameTick(sessionId: string): void {
     roundActive: session.gameState === 'playing',
     tickRate: session.tickRate,
   };
+
+  // Debug: Log wall IDs every 60 ticks (once per second at 60Hz) to verify stability
+  if (session.currentTick % 60 === 0) {
+    const crateIds = session.crates.map(c => c.id).join(', ');
+    console.log(`[Server] Tick ${session.currentTick}: Crate IDs = ${crateIds}`);
+  }
 
   // Store state in history for lag compensation (keep last 60 states = 1 second at 60Hz)
   const historicalState: HistoricalState = {

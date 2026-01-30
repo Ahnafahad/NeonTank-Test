@@ -535,6 +535,7 @@ export class Game {
     this.crates.forEach(c => existingCrates.set(c.id, c));
 
     const updatedCrates: Wall[] = [];
+    let newCratesCreated = 0;
     for (const wallData of mergedState.walls) {
       if (wallData.destructible && wallData.active) {
         let crate = existingCrates.get(wallData.id);
@@ -546,6 +547,8 @@ export class Game {
           }
         } else {
           // Create new crate with server's ID
+          newCratesCreated++;
+          Logger.debug(`[Game] Creating NEW crate with ID: ${wallData.id} at (${wallData.x}, ${wallData.y})`);
           crate = new Wall(wallData.x, wallData.y, wallData.w, wallData.h, true, wallData.id);
           if (wallData.health !== undefined) {
             crate.health = wallData.health;
@@ -554,6 +557,13 @@ export class Game {
         updatedCrates.push(crate);
       }
     }
+
+    if (newCratesCreated > 0) {
+      Logger.debug(`[Game] ⚠️ Created ${newCratesCreated} NEW crates this frame (should only happen once!)`);
+      Logger.debug(`[Game] Existing crates IDs: ${Array.from(existingCrates.keys()).join(', ')}`);
+      Logger.debug(`[Game] Server crate IDs: ${mergedState.walls.filter(w => w.destructible).map(w => w.id).join(', ')}`);
+    }
+
     this.crates = updatedCrates;
 
     // Apply scores - create new object to ensure React detects change

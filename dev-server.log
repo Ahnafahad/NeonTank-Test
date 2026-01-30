@@ -1576,3 +1576,4 @@ https://nextjs.org/docs/messages/module-not-found
  GET /__server_sent_events__ 404 in 1619ms (compile: 31ms, render: 1588ms)
  GET /__server_sent_events__ 404 in 127ms (compile: 25ms, render: 102ms)
  GET /__server_sent_events__ 404 in 157ms (compile: 23ms, render: 134ms)
+ GET / 200 in 642ms (compile: 295ms, render: 347ms)
