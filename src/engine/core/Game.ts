@@ -306,7 +306,14 @@ export class Game {
     this.crates = [];
     this.hazards = [];
 
-    // Static Walls
+    // In online/LAN modes, the server is authoritative for all entities
+    // Client receives map data from server, don't create local copies with mismatched IDs
+    if (this.mode === 'online' || this.mode === 'lan') {
+      console.log('[Game] Online/LAN mode - skipping local map creation, waiting for server data');
+      return; // Server will send all entities with their IDs
+    }
+
+    // Static Walls (local/AI modes only)
     this.walls.push(new Wall(450, 300, 100, 100)); // Center
 
     this.walls.push(new Wall(150, 100, 50, 150));
