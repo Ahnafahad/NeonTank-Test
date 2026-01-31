@@ -9,6 +9,7 @@ export type LANRole = 'host' | 'guest';
 export interface LANNetworkCallbacks {
   onStateUpdate?: (state: LANGameState) => void;
   onConnectionLost?: () => void;
+  onInput?: (guestId: string, input: any) => void;
 }
 
 /**
@@ -45,9 +46,11 @@ export class LANNetworkManager {
     if (!this.server) return;
 
     this.server.onInput((guestId, input) => {
-      // Forward input to game engine
-      // The host game engine will process this input for the guest tank
+      // Forward input to game engine via callback
       Logger.debug('[LANNetworkManager] Received input from guest:', input);
+      if (this.callbacks.onInput) {
+        this.callbacks.onInput(guestId, input);
+      }
     });
 
     this.server.onGuestLeft((guestId) => {

@@ -169,10 +169,17 @@ function GameContent() {
           return;
         }
 
-        gameRef.current = new Game(canvasRef.current, mode, {
-          ...gameSettings,
-          localPlayerControls: 'wasd', // Default for now, can be made configurable
-        });
+        // Pass LAN network manager to Game constructor
+        gameRef.current = new Game(
+          canvasRef.current,
+          mode,
+          {
+            ...gameSettings,
+            localPlayerControls: 'wasd', // Default for now, can be made configurable
+          },
+          undefined, // No online network manager
+          lanNetworkManager // Pass LAN network manager
+        );
 
         // Set up LAN connection callbacks
         lanNetworkManager.setCallbacks({

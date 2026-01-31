@@ -107,6 +107,7 @@ export class Game {
   private inputManager: InputManager;
   private tankAI: TankAI | null = null;
   private networkManager: NetworkManager | null = null;
+  private lanNetworkManager: any | null = null; // LANNetworkManager - avoiding circular import
   private assignedTankId: number | null = null;
   private gameRulesSystem!: GameRulesSystem;
   private renderSystem: RenderSystem;
@@ -164,7 +165,8 @@ export class Game {
     canvas: HTMLCanvasElement,
     mode: GameMode = 'local',
     settings?: Partial<GameSettings>,
-    networkManager?: NetworkManager
+    networkManager?: NetworkManager,
+    lanNetworkManager?: any // LANNetworkManager - avoiding circular import
   ) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d');
@@ -232,6 +234,14 @@ export class Game {
       this.networkManager = networkManager;
       this.assignedTankId = networkManager.getAssignedTankId();
       this.setupNetworkCallbacks();
+    }
+
+    // Setup LAN network manager for LAN mode
+    if (this.mode === 'lan' && lanNetworkManager) {
+      this.lanNetworkManager = lanNetworkManager;
+      this.assignedTankId = lanNetworkManager.getAssignedTankId();
+      this.setupLANCallbacks();
+      console.log('[Game] LAN mode initialized, role:', lanNetworkManager.isHost() ? 'host' : 'guest', 'tankId:', this.assignedTankId);
     }
 
     this.initGame();
@@ -376,6 +386,110 @@ export class Game {
         this.roundWinner = null;
       },
     });
+  }
+
+  // Store guest input as synthesized keys object for next update
+  private guestInputKeys: { [key: string]: boolean } = {};
+
+  private setupLANCallbacks(): void {
+    if (!this.lanNetworkManager) return;
+
+    const isHost = this.lanNetworkManager.isHost();
+
+    if (isHost) {
+      // Host: Receive input from guest and convert to keys object
+      this.lanNetworkManager.setCallbacks({
+        onInput: (guestId: string, input: any) => {
+          // Convert guest movement input to synthesized keys object
+          const guestTank = this.p2;
+          if (guestTank && input) {
+            // Create synthesized keys object based on guest tank's controls
+            this.guestInputKeys = {};
+
+            if (input.movement) {
+              // Map movement vector to directional keys
+              // Guest tank (p2) uses arrow keys by default
+              const controls = guestTank.controls;
+
+              // Horizontal movement (use 0.5 threshold to handle joystick input)
+              if (input.movement.x > 0.5) {
+                this.guestInputKeys[controls.right] = true;
+              } else if (input.movement.x < -0.5) {
+                this.guestInputKeys[controls.left] = true;
+              }
+
+              // Vertical movement
+              if (input.movement.y < -0.5) {
+                this.guestInputKeys[controls.up] = true;
+              } else if (input.movement.y > 0.5) {
+                this.guestInputKeys[controls.down] = true;
+              }
+            }
+
+            // Shoot input
+            if (input.shoot) {
+              this.guestInputKeys[guestTank.controls.shoot] = true;
+              // Directly apply charge level for charging system
+              if (this.settings.charging && input.chargeLevel !== undefined) {
+                guestTank.chargeLevel = input.chargeLevel;
+                guestTank.isCharging = input.chargeLevel > 0;
+              }
+            }
+          }
+        }
+      });
+    } else {
+      // Guest: Receive game state from host and apply it
+      this.lanNetworkManager.setCallbacks({
+        onStateUpdate: (state: any) => {
+          this.applyLANState(state);
+        }
+      });
+    }
+  }
+
+  private applyLANState(state: any): void {
+    if (!state) return;
+
+    // Apply tank states
+    if (state.tanks && state.tanks.length >= 2) {
+      // Update tank 1 (host)
+      if (this.p1 && state.tanks[0]) {
+        this.p1.pos.x = state.tanks[0].position.x;
+        this.p1.pos.y = state.tanks[0].position.y;
+        this.p1.angle = state.tanks[0].rotation;
+        this.p1.health = state.tanks[0].health;
+      }
+
+      // Update tank 2 (guest - that's us)
+      if (this.p2 && state.tanks[1]) {
+        this.p2.pos.x = state.tanks[1].position.x;
+        this.p2.pos.y = state.tanks[1].position.y;
+        this.p2.angle = state.tanks[1].rotation;
+        this.p2.health = state.tanks[1].health;
+      }
+    }
+
+    // Apply bullet states
+    if (state.bullets) {
+      // Simply replace bullets array with received state
+      // Host is authoritative for all bullets
+      this.bullets = state.bullets.map((bulletData: any) => {
+        const angle = Math.atan2(bulletData.velocity.y, bulletData.velocity.x);
+        const bullet = new Bullet(
+          bulletData.position.x,
+          bulletData.position.y,
+          angle,
+          parseInt(bulletData.ownerId) === 1 ? Constants.PLAYER1_COLOR : Constants.PLAYER2_COLOR,
+          parseInt(bulletData.ownerId),
+          'NORMAL'
+        );
+        bullet.id = bulletData.id;
+        bullet.vel.x = bulletData.velocity.x;
+        bullet.vel.y = bulletData.velocity.y;
+        return bullet;
+      });
+    }
   }
 
   private applyServerState(state: GameStateSnapshot): void {
@@ -1068,6 +1182,92 @@ export class Game {
       }
 
       // Server will update remote player and game state via callbacks
+      return;
+    }
+
+    // Handle LAN mode
+    if (this.mode === 'lan' && this.lanNetworkManager && this.assignedTankId) {
+      const isHost = this.lanNetworkManager.isHost();
+      const localTank = this.assignedTankId === 1 ? this.p1 : this.p2;
+      const controls = localTank.controls;
+
+      if (isHost) {
+        // HOST: Run full game logic locally and broadcast state
+        const p1Bullets = this.p1.update(
+          keys,
+          this.walls,
+          this.crates,
+          this.hazards,
+          this.p2,
+          this.suddenDeathActive,
+          this.suddenDeathInset,
+          this.settings,
+          deltaMultiplier
+        );
+
+        const p2Bullets = this.p2.update(
+          this.guestInputKeys, // P2 input comes from guest via callbacks
+          this.walls,
+          this.crates,
+          this.hazards,
+          this.p1,
+          this.suddenDeathActive,
+          this.suddenDeathInset,
+          this.settings,
+          deltaMultiplier
+        );
+
+        this.bullets.push(...p1Bullets, ...p2Bullets);
+
+        // Update bullets
+        for (let i = this.bullets.length - 1; i >= 0; i--) {
+          const b = this.bullets[i];
+          b.update(this.walls, this.crates);
+
+          if (!b.active) {
+            this.createExplosion(b.pos.x, b.pos.y, b.color, 5);
+            this.bullets.splice(i, 1);
+          }
+        }
+
+        // Broadcast game state to guest
+        this.lanNetworkManager.broadcastGameState([this.p1, this.p2], this.bullets);
+
+        // Update particles and other entities
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+          this.particles[i].update();
+          if (this.particles[i].isDead()) {
+            this.particles.splice(i, 1);
+          }
+        }
+
+        // Update powerups
+        for (let i = this.powerups.length - 1; i >= 0; i--) {
+          this.powerups[i].update();
+        }
+      } else {
+        // GUEST: Send input to host, receive state via callbacks
+        const movement = {
+          x: (keys[controls.right] ? 1 : 0) - (keys[controls.left] ? 1 : 0),
+          y: (keys[controls.down] ? 1 : 0) - (keys[controls.up] ? 1 : 0),
+        };
+
+        const shoot = keys[controls.shoot] || false;
+        const chargeLevel = localTank.chargeLevel || 0;
+
+        // Send input to host
+        this.lanNetworkManager.sendInput(movement, shoot, chargeLevel);
+
+        // Guest only renders - state updates come from host via applyLANState()
+        // Update particles locally for smooth visuals
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+          this.particles[i].update();
+          if (this.particles[i].isDead()) {
+            this.particles.splice(i, 1);
+          }
+        }
+      }
+
       return;
     }
 
