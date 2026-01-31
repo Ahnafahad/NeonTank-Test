@@ -545,6 +545,8 @@ export class Game {
     const existingCrates = new Map<string, Wall>();
     this.crates.forEach(c => existingCrates.set(c.id, c));
 
+    console.log(`[Game] mergedState.walls count: ${mergedState.walls.length}, destructible: ${mergedState.walls.filter(w => w.destructible).length}`);
+
     const updatedCrates: Wall[] = [];
     let newCratesCreated = 0;
     for (const wallData of mergedState.walls) {
