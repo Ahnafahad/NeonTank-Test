@@ -857,15 +857,10 @@ function computeStateDelta(
     delta.powerups = lastState.powerups;
   }
 
-  // 4. Walls - LOW PRIORITY: update every 4th tick (only destructible walls that took damage)
+  // 4. Walls - Send ALL walls on slow ticks to prevent empty array bug
+  // (Only 11 walls total, small bandwidth cost)
   if (isSlowTick) {
-    for (const wall of currentState.walls) {
-      if (!wall.destructible) continue; // Skip indestructible walls
-      const lastWall = lastState.walls.find((w) => w.id === wall.id);
-      if (!lastWall || wall.health !== lastWall.health || wall.active !== lastWall.active) {
-        delta.walls.push(wall);
-      }
-    }
+    delta.walls = currentState.walls; // Always send full wall list
   } else {
     // On fast ticks, keep last wall state
     delta.walls = lastState.walls;
