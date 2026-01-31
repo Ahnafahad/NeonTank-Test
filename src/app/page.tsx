@@ -170,6 +170,7 @@ function GameContent() {
         }
 
         // Pass LAN network manager to Game constructor
+        // Game class will set up all callbacks internally (onInput, onStateUpdate)
         gameRef.current = new Game(
           canvasRef.current,
           mode,
@@ -181,13 +182,9 @@ function GameContent() {
           lanNetworkManager // Pass LAN network manager
         );
 
-        // Set up LAN connection callbacks
-        lanNetworkManager.setCallbacks({
-          onConnectionLost: () => {
-            Logger.debug('[LAN] Connection lost');
-            endGame(isLanHost ? 1 : 2); // End game if connection lost
-          }
-        });
+        // Note: DO NOT call lanNetworkManager.setCallbacks() here
+        // Game class already sets up all necessary callbacks in setupLANCallbacks()
+        console.log('[LAN] Game instance created, role:', isLanHost ? 'host' : 'guest');
       } else {
         gameRef.current = new Game(canvasRef.current, mode, gameSettings);
       }

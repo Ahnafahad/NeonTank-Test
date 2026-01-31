@@ -400,6 +400,7 @@ export class Game {
       // Host: Receive input from guest and convert to keys object
       this.lanNetworkManager.setCallbacks({
         onInput: (guestId: string, input: any) => {
+          console.log('[Game/Host] Received guest input:', input);
           // Convert guest movement input to synthesized keys object
           const guestTank = this.p2;
           if (guestTank && input) {
@@ -435,6 +436,7 @@ export class Game {
                 guestTank.isCharging = input.chargeLevel > 0;
               }
             }
+            console.log('[Game/Host] Synthesized guest keys:', this.guestInputKeys);
           }
         }
       });
@@ -442,6 +444,7 @@ export class Game {
       // Guest: Receive game state from host and apply it
       this.lanNetworkManager.setCallbacks({
         onStateUpdate: (state: any) => {
+          console.log('[Game/Guest] Received state from host:', state);
           this.applyLANState(state);
         }
       });

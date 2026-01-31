@@ -844,14 +844,10 @@ function computeStateDelta(
     }
   }
 
-  // 3. Powerups - LOW PRIORITY: update every 4th tick (7.5Hz at 30Hz server)
+  // 3. Powerups - Send ALL powerups on slow ticks to prevent empty array bug
+  // (Typically 0-3 powerups, small bandwidth cost)
   if (isSlowTick) {
-    for (const powerup of currentState.powerups) {
-      const lastPowerup = lastState.powerups.find((p) => p.id === powerup.id);
-      if (!lastPowerup || powerup.active !== lastPowerup.active) {
-        delta.powerups.push(powerup);
-      }
-    }
+    delta.powerups = currentState.powerups; // Always send full powerup list
   } else {
     // On fast ticks, keep last powerup state
     delta.powerups = lastState.powerups;
