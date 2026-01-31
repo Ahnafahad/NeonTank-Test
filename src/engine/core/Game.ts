@@ -307,10 +307,11 @@ export class Game {
     this.crates = [];
     this.hazards = [];
 
-    // In online/LAN modes, the server is authoritative for all entities
+    // In ONLINE mode, the server is authoritative for all entities
     // Client receives map data from server, don't create local copies with mismatched IDs
-    if (this.mode === 'online' || this.mode === 'lan') {
-      console.log('[Game] Online/LAN mode - skipping local map creation, waiting for server data');
+    // LAN mode works differently - host creates map locally, guest receives state from host
+    if (this.mode === 'online') {
+      console.log('[Game] Online mode - skipping local map creation, waiting for server data');
       return; // Server will send all entities with their IDs
     }
 
